@@ -26,9 +26,9 @@ CFLAGS += -DDEBUG=1
 #CFLAGS += -g -fbranch-probabilities
 #LDFLAGS := 
 
-all: loadjpeg
+all: loadjpeg.exe
 
-loadjpeg: tinyjpeg.o loadjpeg.o jidctflt.o
+loadjpeg.exe: tinyjpeg.o loadjpeg.o jidctflt.o
 	$(CC) -o $@ $(LDFLAGS) $^
 
 tinyjpeg.o: tinyjpeg.c tinyjpeg.h tinyjpeg-internal.h
@@ -36,9 +36,9 @@ tinyjpeg.o: tinyjpeg.c tinyjpeg.h tinyjpeg-internal.h
 loadjpeg.o: loadjpeg.c tinyjpeg.h
 
 clean:
-	$(RM) loadjpeg *.o *.gcda *.gcno
+	$(RM) loadjpeg.exe *.o *.gcda *.gcno
 
-tests: loadjpeg
+tests: loadjpeg.exe
 	time -p $(MAKE) __tests
 
 /tmp/testrgb-1x1.jpg:
@@ -48,7 +48,7 @@ tests: loadjpeg
 __tests: /tmp/testrgb-1x1.jpg
 	for fmt in rgb24 bgr24 grey yuv420p; do \
 	  for x in 1 2 ; do for y in 1 2 ; do \
-	    loadjpeg /tmp/testrgb-$${x}x$$y.jpg $${fmt} /tmp/testrgb-$${x}x$$y-$${fmt}; \
+	    loadjpeg.exe /tmp/testrgb-$${x}x$$y.jpg $${fmt} /tmp/testrgb-$${x}x$$y-$${fmt}; \
 	    done; done; \
 	done;
 
