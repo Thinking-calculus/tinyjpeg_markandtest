@@ -64,6 +64,16 @@ struct huffman_table
   uint16_t slowtable[16-HUFFMAN_HASH_NBITS][256];
 };
 
+
+/**
+ * @brief 
+ * 对每个颜色分量(for each component)
+    ID
+    垂直方向的样本因子(vertical sample factor)
+    水平方向的样本因子(horizontal sample factor)
+    量化表号(quantization table#)
+ * 
+ */
 struct component 
 {
   unsigned int Hfactor;

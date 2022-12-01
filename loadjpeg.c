@@ -219,21 +219,21 @@ int convert_one_image(const char *infilename, const char *outfilename, int outpu
   buf = (unsigned char *)malloc(length_of_file + 4);
   if (buf == NULL)
     exitmessage("Not enough memory for loading file\n");
-  fread(buf, length_of_file, 1, fp);
+  fread(buf, length_of_file, 1, fp);//create "buf" to copy the origin's file buffer and then close origin file
   fclose(fp);
 
-  /* Decompress it */
+  /* Decompress it */   //CGX:Focus here
   jdec = tinyjpeg_init();
   if (jdec == NULL)
     exitmessage("Not enough memory to alloc the structure need for decompressing\n");
 
-  if (tinyjpeg_parse_header(jdec, buf, length_of_file)<0)
+  if (tinyjpeg_parse_header(jdec, buf, length_of_file)<0)//CGX:get info from file's header
     exitmessage(tinyjpeg_get_errorstring(jdec));
 
   /* Get the size of the image */
   tinyjpeg_get_size(jdec, &width, &height);
 
-  printf("Decoding JPEG image...\n");
+  printf("Decoding JPEG image...\n");//CGX:do real decompress
   if (tinyjpeg_decode(jdec, output_format) < 0)
     exitmessage(tinyjpeg_get_errorstring(jdec));
 
@@ -284,7 +284,7 @@ static void usage(void)
  * main
  *
  */
-int main(int argc, char *argv[])
+int main(int argc, char *argv[])//CGX tinyjpeg 工具的入口
 {
   int output_format = TINYJPEG_FMT_YUV420P;
   char *output_filename, *input_filename;
