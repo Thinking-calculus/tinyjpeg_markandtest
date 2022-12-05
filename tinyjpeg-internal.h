@@ -61,7 +61,7 @@ struct huffman_table
   /* some place to store value that is not encoded in the lookup table 
    * FIXME: Calculate if 256 value is enough to store all values
    */
-  uint16_t slowtable[16-HUFFMAN_HASH_NBITS][256];
+  uint16_t slowtable[16-HUFFMAN_HASH_NBITS][256];     //unsigned short int      uint16_t;
 };
 
 

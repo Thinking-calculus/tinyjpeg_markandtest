@@ -403,6 +403,9 @@ static void process_Huffman_data_unit(struct jdec_private *priv, int component)
  * code_size will be used to known how many bits this symbol is encoded.
  * slowtable will be used when the first lookup didn't give the result.
  */
+/**
+ * vals: 16位行标记后的树解码数据(symbol)这些数据将被霍夫曼树代替索引
+*/
 static void build_huffman_table(const unsigned char *bits, const unsigned char *vals, struct huffman_table *table)
 {
   unsigned int i, j, code, code_size, val, nbits;
@@ -415,10 +418,10 @@ static void build_huffman_table(const unsigned char *bits, const unsigned char *
    *   huffsize[X] => numbers of bits to write vals[X]
    */
   hz = huffsize;//huffsize 这个结构是16*16的大小
-  for (i = 1; i <= 16; i++)
+  for (i = 1; i <= 16; i++)//之后前16位代表每行中bit的数量
   {
-    for (j = 1; j <= bits[i]; j++)//bits在前面知道保存了前16位数据代表译码码长
-      *hz++ = i;//按照译码码长，给16个数值所代表的行和以数值大小占位
+    for (j = 1; j <= bits[i]; j++)//bits是前面解析的前16位数据，如果bits[i]为0，说明这行的数据为0，会直接跳过该行
+      *hz++ = i;//按照译码码长，给16个数值所代表的行和所需要的数值量大小占位eg: 11 222 3 4444 对应(1:2,2:3,3:1,4:4)
   }
   *hz = 0;//避免空指针
 
@@ -430,40 +433,51 @@ static void build_huffman_table(const unsigned char *bits, const unsigned char *
   /* Build a temp array
    *   huffcode[X] => code used to write vals[X]
    */
-  code = 0;
+  code = 0;    //树从0开始
   hc = huffcode;
   hz = huffsize;
-  nbits = *hz;
-  while (*hz)
+  nbits = *hz;//因为前几行可能会有0数据长度行的情况，所以前面huffsize 已经保存了第一个非零的行，以此为起点构建
+  while (*hz)//遍历保存的16位对应长度的数据
   {
-    while (*hz == nbits)
+    while (*hz == nbits)//解析出来的前16位hex是代表对应行数据量的大小，在前面构建hz时，就会把同一行，多个数据都赋值位对应行的行数，所以这里需要一次全部拿到对应到行的数据空间
     {
-      *hc++ = code++;//CGX :check why it means
+      *hc++ = code++;//CGX :对同样bit 长度的赋予长度相同的2进制值，这些值即树结构上对应索引值
       hz++;
     }
-    code <<= 1;
+    code <<= 1;//code切换到下一个码长的范围 |(00),(01)2|(100),(101),(111)3|(1000)(1001)....4|...  赋值遵循C_j=(C_{j-k}+1)<<K
     nbits++;
   }
-
+  //以上实际已经将所有符号和值一一对应起来，其中code按顺序储存在huffcode,symbol 则隐含在huffsize里面
   /*
    * Build the lookup table, and the slowtable if needed.
    */
   next_free_entry = -1;
-  for (i = 0; huffsize[i]; i++)
+  for (i = 0; huffsize[i]; i++)//遍历所有有长度的行的每个节点，只要存在节点(not null)就不会停止
   {
-    val = vals[i];
-    code = huffcode[i];
-    code_size = huffsize[i];
+    val = vals[i];//获取每个symbol，即每个会被霍夫曼树映射的原值
+    code = huffcode[i];//symbol 对应的 二进制值
+    code_size = huffsize[i];//symbol所代表的二进制数所用的位数长度
 
-    trace("val=%2.2x code=%8.8x codesize=%2.2d\n", val, code, code_size);
+    trace("val=%2.2x code=%8.8x codesize=%2.2d\n", val, code, code_size);// val=symbol(被映射为树的原值) code=二进制代表(树节点) codesize=所使用的二级制长度(树深度)
 
-    table->code_size[val] = code_size;
-    if (code_size <= HUFFMAN_HASH_NBITS)
+    //table->code_size 是一个512=2^9的数组，所以可以保存0->2^9数据中的任一位，且能够直接索引
+    table->code_size[val] = code_size;//开始构建树，先将树中对应到的symble 位置的数据赋予对应的长度值占位，多个不同的symble有可能长度值相同
+    if (code_size <= HUFFMAN_HASH_NBITS)//长度短于9的，直接通过缓存的方式创建映射，空间换时间
     {
       /*
        * Good: val can be put in the lookup table, so fill all value of this
        * column with value val
+       * 
        */
+      /*
+        按照如下的结构，lookup数组有512即2^9,为9层的树结构,将二进制最短的数据放在最深的位置，这样二进制短的可以更快(因为数量更多)被匹配到，然后越长的二进制索引则越靠上(类似于升级打怪,到顶部的二进制实际上没有几个，遇到的可能性没有最底下的高)
+                  o
+               /     \
+            o   o   o  o
+           / \ / \ / \ / \
+          o  o o o o o o  o
+          .................
+      */
       int repeat = 1UL << (HUFFMAN_HASH_NBITS - code_size);
       code <<= HUFFMAN_HASH_NBITS - code_size;
       while (repeat--)
@@ -472,10 +486,10 @@ static void build_huffman_table(const unsigned char *bits, const unsigned char *
     else
     {
       /* Perhaps sorting the array will be an optimization */
-      uint16_t *slowtable = table->slowtable[code_size - HUFFMAN_HASH_NBITS - 1];
-      while (slowtable[0])
-        slowtable += 2;
-      slowtable[0] = code;
+      uint16_t *slowtable = table->slowtable[code_size - HUFFMAN_HASH_NBITS - 1];//是一个7个长度为
+      while (slowtable[0])//只能遍历7次，大于9的只有剩下的7个长度的数据
+        slowtable += 2;   //当前的索引已经被占用，遍历到最后一个没有占用的为止
+      slowtable[0] = code;//CG:有必要为3个值设置如此大的空间吗(256)意义是什么？是不是可以优化掉？
       slowtable[1] = val;
       slowtable[2] = 0;
       /* TODO: NEED TO CHECK FOR AN OVERFLOW OF THE TABLE */
@@ -1734,10 +1748,10 @@ static int parse_DHT(struct jdec_private *priv, const unsigned char *stream)
     else
       build_huffman_table(huff_bits, stream, &priv->HTDC[index & 0xf]);//DC，这里再&上是为了获取到霍夫曼编码树id
 
-    length -= 1;
-    length -= 16;
-    length -= count;
-    stream += count;
+    length -= 1;//减去头部标识index的长度
+    length -= 16;//减去16位长度表示所用长度
+    length -= count;//减去symbol所用的长度
+    stream += count;//继续解析下一个霍夫曼编码表,一般包含ac，dc，以及多个不同编码标签的霍夫曼编码表
   }
   trace("< DHT marker\n");
   return 0;
@@ -1859,7 +1873,7 @@ static int parse_JFIF(struct jdec_private *priv, const unsigned char *stream)
         return -1;
       sos_marker_found = 1;
       break;
-    case DHT: //CGX 0xC4 霍夫曼编码表,一些图片的霍夫曼编码会在DQT之后，
+    case DHT: //CGX 0xC4 霍夫曼编码表,一些图片的DHT会在DQT之后，
       if (parse_DHT(priv, stream) < 0)
         return -1;
       dht_marker_found = 1;
