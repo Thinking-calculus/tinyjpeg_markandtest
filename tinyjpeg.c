@@ -348,13 +348,13 @@ static void process_Huffman_data_unit(struct jdec_private *priv, int component)
   /* Initialize the DCT coef table */
   memset(DCT, 0, sizeof(DCT));
 
-  /* DC coefficient decoding */
-  huff_code = get_next_huffman_code(priv, c->DC_table);
+  /* DC coefficient decoding */  //8*8的方格，左上角第一位时DC量
+  huff_code = get_next_huffman_code(priv, c->DC_table);//CGX 将霍夫曼code 转回 symbol
   // trace("+ %x\n", huff_code);
   if (huff_code)
   {
     get_nbits(priv->reservoir, priv->nbits_in_reservoir, priv->stream, huff_code, DCT[0]);
-    DCT[0] += c->previous_DC;
+    DCT[0] += c->previous_DC;//为了节约资源，多个不同的64方格的DC 变量会再量化一次，会需要参考到多个DC变量的相关关系
     c->previous_DC = DCT[0];
   }
   else
@@ -1650,7 +1650,7 @@ static int parse_SOF(struct jdec_private *priv, const unsigned char *stream)
     cid = *stream++;//component id号
     sampling_factor = *stream++;
     Q_table = *stream++;
-    c = &priv->component_infos[i];
+    c = &priv->component_infos[i];//CGX 设置组件id号，在sos段中将用于索引(组件id(色彩通道))
 #if SANITY_CHECK
     c->cid = cid;
     if (Q_table >= COMPONENTS)//量化表和组件号是对应的,允许多个factor使用同一个量化表?
@@ -1673,7 +1673,7 @@ static int parse_SOF(struct jdec_private *priv, const unsigned char *stream)
 static int parse_SOS(struct jdec_private *priv, const unsigned char *stream)
 {
   unsigned int i, cid, table;
-  unsigned int nr_components = stream[2];
+  unsigned int nr_components = stream[2];//图像通道数量(Y,U,V)
 
   trace("> SOS marker\n");
 
@@ -1683,24 +1683,25 @@ static int parse_SOS(struct jdec_private *priv, const unsigned char *stream)
 #endif
 
   stream += 3;
+  //设定不同通道数据会使用的哈夫曼编码树
   for (i = 0; i < nr_components; i++)
   {
-    cid = *stream++;
-    table = *stream++;
+    cid = *stream++;//component id
+    table = *stream++;  //一个hex用于表示对应通道使用的哈曼夫编码表编号
 #if SANITY_CHECK
     if ((table & 0xf) >= 4)
       error("We do not support more than 2 AC Huffman table\n");
     if ((table >> 4) >= 4)
       error("We do not support more than 2 DC Huffman table\n");
-    if (cid != priv->component_infos[i].cid)
+    if (cid != priv->component_infos[i].cid)//CGX 在SOF中获取到图片通道id(component id),会需要在这里矫正一次
       error("SOS cid order (%d:%d) isn't compatible with the SOF marker (%d:%d)\n",
             i, cid, i, priv->component_infos[i].cid);
-    trace("ComponentId:%d  tableAC:%d tableDC:%d\n", cid, table & 0xf, table >> 4);
+    trace("ComponentId:%d  tableAC:%d tableDC:%d,table:%d\n", cid, table & 0xf, table >> 4,table);
 #endif
-    priv->component_infos[i].AC_table = &priv->HTAC[table & 0xf];
+    priv->component_infos[i].AC_table = &priv->HTAC[table & 0xf];//设置几个不同的通道会使用的哈夫曼编码树
     priv->component_infos[i].DC_table = &priv->HTDC[table >> 4];
   }
-  priv->stream = stream + 3;
+  priv->stream = stream + 3;//
   trace("< SOS marker\n");
   return 0;
 }
@@ -1868,12 +1869,12 @@ static int parse_JFIF(struct jdec_private *priv, const unsigned char *stream)
       if (parse_DQT(priv, stream) < 0)
         return -1;
       break;
-    case SOS: //Start of Scan
+    case SOS: //Start of Scan 获取通道(组件)id和对应使用的霍夫曼编码树
       if (parse_SOS(priv, stream) < 0)
         return -1;
-      sos_marker_found = 1;
+      sos_marker_found = 1;//当发现sos标签时，代表可以开始解码，会跳出chunk的识别循环
       break;
-    case DHT: //CGX 0xC4 霍夫曼编码表,一些图片的DHT会在DQT之后，
+    case DHT: //CGX 0xC4 霍夫曼编码表,一些图片的DHT会在SOF之后，
       if (parse_DHT(priv, stream) < 0)
         return -1;
       dht_marker_found = 1;
@@ -2029,8 +2030,8 @@ int tinyjpeg_decode(struct jdec_private *priv, int pixfmt)
   unsigned int x, y, xstride_by_mcu, ystride_by_mcu;
   unsigned int bytes_per_blocklines[3], bytes_per_mcu[3];
   decode_MCU_fct decode_MCU;
-  const decode_MCU_fct *decode_mcu_table;
-  const convert_colorspace_fct *colorspace_array_conv;
+  const decode_MCU_fct *decode_mcu_table;//函数指针,针对不同数据使用不同的解码方式
+  const convert_colorspace_fct *colorspace_array_conv;//针对不同的色彩方式使用不同的解码函数
   convert_colorspace_fct convert_to_pixfmt;
 
   if (setjmp(priv->jump_state))
@@ -2042,15 +2043,15 @@ int tinyjpeg_decode(struct jdec_private *priv, int pixfmt)
   bytes_per_blocklines[1] = 0;
   bytes_per_blocklines[2] = 0;
 
-  decode_mcu_table = decode_mcu_3comp_table;
+  decode_mcu_table = decode_mcu_3comp_table;//CGX togo ...
   switch (pixfmt)
   {
   case TINYJPEG_FMT_YUV420P:
     colorspace_array_conv = convert_colorspace_yuv420p;
     if (priv->components[0] == NULL)
-      priv->components[0] = (uint8_t *)malloc(priv->width * priv->height);
+      priv->components[0] = (uint8_t *)malloc(priv->width * priv->height);//灰度部分，按照像素大小创建一块缓冲
     if (priv->components[1] == NULL)
-      priv->components[1] = (uint8_t *)malloc(priv->width * priv->height / 4);
+      priv->components[1] = (uint8_t *)malloc(priv->width * priv->height / 4);//uv 部分，在420的情况下4:2:0,即4个灰度1个色彩信息
     if (priv->components[2] == NULL)
       priv->components[2] = (uint8_t *)malloc(priv->width * priv->height / 4);
     bytes_per_blocklines[0] = priv->width;

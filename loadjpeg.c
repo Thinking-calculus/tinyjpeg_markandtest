@@ -231,7 +231,7 @@ int convert_one_image(const char *infilename, const char *outfilename, int outpu
     exitmessage(tinyjpeg_get_errorstring(jdec));
 
   /* Get the size of the image */
-  tinyjpeg_get_size(jdec, &width, &height);
+  tinyjpeg_get_size(jdec, &width, &height);//SOF中会包含图片的基础信息(长宽)
 
   printf("Decoding JPEG image...\n");//CGX:do real decompress
   if (tinyjpeg_decode(jdec, output_format) < 0)
