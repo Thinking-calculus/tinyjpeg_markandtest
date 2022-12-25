@@ -299,30 +299,31 @@ static int get_next_huffman_code(struct jdec_private *priv, struct huffman_table
   int value, hcode;
   unsigned int extra_nbits, nbits;
   uint16_t *slowtable;
-
-  look_nbits(priv->reservoir, priv->nbits_in_reservoir, priv->stream, HUFFMAN_HASH_NBITS, hcode);
-  value = huffman_table->lookup[hcode];
+  // priv->stream 在header sos 解析后，其指向开始decode的位置。priv->reservoir,nbits_in_reservoir 在开始decode前(resync)被初始化0
+  look_nbits(priv->reservoir, priv->nbits_in_reservoir, priv->stream, HUFFMAN_HASH_NBITS, hcode); //取前9位，用于快速检索
+  value = huffman_table->lookup[hcode];                                                           // CGX 快速检索
   if (__likely(value >= 0))
   {
     unsigned int code_size = huffman_table->code_size[value];
-    skip_nbits(priv->reservoir, priv->nbits_in_reservoir, priv->stream, code_size);
+    skip_nbits(priv->reservoir, priv->nbits_in_reservoir, priv->stream, code_size); //保留当前的进度，便于下次继续？
     return value;
   }
 
+  //当出现前9位仍然没有匹配到symbol的时候，需要继续从慢检索池内匹配（9->16)位所代表symbol的情况
   /* Decode more bits each time ... */
   for (extra_nbits = 0; extra_nbits < 16 - HUFFMAN_HASH_NBITS; extra_nbits++)
   {
-    nbits = HUFFMAN_HASH_NBITS + 1 + extra_nbits;
+    nbits = HUFFMAN_HASH_NBITS + 1 + extra_nbits; //从9位开始，依次遍历到16位的情况，过程中有匹配到symbol，则直接跳出
 
     look_nbits(priv->reservoir, priv->nbits_in_reservoir, priv->stream, nbits, hcode);
-    slowtable = huffman_table->slowtable[extra_nbits];
+    slowtable = huffman_table->slowtable[extra_nbits]; //
     /* Search if the code is in this array */
     while (slowtable[0])
     {
       if (slowtable[0] == hcode)
       {
         skip_nbits(priv->reservoir, priv->nbits_in_reservoir, priv->stream, nbits);
-        return slowtable[1];
+        return slowtable[1]; //匹配到对应符号，直接返回symbol
       }
       slowtable += 2;
     }
@@ -348,14 +349,14 @@ static void process_Huffman_data_unit(struct jdec_private *priv, int component)
   /* Initialize the DCT coef table */
   memset(DCT, 0, sizeof(DCT));
 
-  /* DC coefficient decoding */  //8*8的方格，左上角第一位时DC量
-  huff_code = get_next_huffman_code(priv, c->DC_table);//CGX 将霍夫曼code 转回 symbol
+  /* DC coefficient decoding */                         // 8*8的方格，左上角第一位是DC量
+  huff_code = get_next_huffman_code(priv, c->DC_table); // CGX 将霍夫曼code 转回 symbol
   // trace("+ %x\n", huff_code);
   if (huff_code)
   {
     get_nbits(priv->reservoir, priv->nbits_in_reservoir, priv->stream, huff_code, DCT[0]);
-    DCT[0] += c->previous_DC;//为了节约资源，多个不同的64方格的DC 变量会再量化一次，会需要参考到多个DC变量的相关关系
-    c->previous_DC = DCT[0];
+    DCT[0] += c->previous_DC; //为了节约资源，多个不同的64方格的DC 变量会再量化一次，会需要参考到多个DC变量的相关关系
+    c->previous_DC = DCT[0];  //初始previous_DC=0
   }
   else
   {
@@ -393,9 +394,9 @@ static void process_Huffman_data_unit(struct jdec_private *priv, int component)
   }
 
   for (j = 0; j < 64; j++)
-    c->DCT[j] = DCT[zigzag[j]];
-}
+    c->DCT[j] = DCT[zigzag[j]]; // 64像素zigzag化
 
+}
 /*
  * Takes two array of bits, and build the huffman table for size, and code
  *
@@ -405,7 +406,7 @@ static void process_Huffman_data_unit(struct jdec_private *priv, int component)
  */
 /**
  * vals: 16位行标记后的树解码数据(symbol)这些数据将被霍夫曼树代替索引
-*/
+ */
 static void build_huffman_table(const unsigned char *bits, const unsigned char *vals, struct huffman_table *table)
 {
   unsigned int i, j, code, code_size, val, nbits;
@@ -417,34 +418,34 @@ static void build_huffman_table(const unsigned char *bits, const unsigned char *
    * Build a temp array
    *   huffsize[X] => numbers of bits to write vals[X]
    */
-  hz = huffsize;//huffsize 这个结构是16*16的大小
-  for (i = 1; i <= 16; i++)//之后前16位代表每行中bit的数量
+  hz = huffsize;            // huffsize 这个结构是16*16的大小
+  for (i = 1; i <= 16; i++) //之后前16位代表每行中bit的数量
   {
-    for (j = 1; j <= bits[i]; j++)//bits是前面解析的前16位数据，如果bits[i]为0，说明这行的数据为0，会直接跳过该行
-      *hz++ = i;//按照译码码长，给16个数值所代表的行和所需要的数值量大小占位eg: 11 222 3 4444 对应(1:2,2:3,3:1,4:4)
+    for (j = 1; j <= bits[i]; j++) // bits是前面解析的前16位数据，如果bits[i]为0，说明这行的数据为0，会直接跳过该行
+      *hz++ = i;                   //按照译码码长，给16个数值所代表的行和所需要的数值量大小占位eg: 11 222 3 4444 对应(1:2,2:3,3:1,4:4)
   }
-  *hz = 0;//避免空指针
+  *hz = 0; //避免空指针
 
   //初始化索引缓冲
-  memset(table->lookup, 0xff, sizeof(table->lookup));//CGX 构建快速索引缓冲,在得到霍夫曼编码树后，可以用于快速解码，short int 每个位置刚好够放一个hex
-  for (i = 0; i < (16 - HUFFMAN_HASH_NBITS); i++)//CGX 对于一些比较长的编码，会存在队列中，用循环比较的方式识别
+  memset(table->lookup, 0xff, sizeof(table->lookup)); // CGX 构建快速索引缓冲,在得到霍夫曼编码树后，可以用于快速解码，short int 每个位置刚好够放一个hex
+  for (i = 0; i < (16 - HUFFMAN_HASH_NBITS); i++)     // CGX 对于一些比较长的编码，会存在队列中，用循环比较的方式识别
     table->slowtable[i][0] = 0;
 
   /* Build a temp array
    *   huffcode[X] => code used to write vals[X]
    */
-  code = 0;    //树从0开始
+  code = 0; //树从0开始
   hc = huffcode;
   hz = huffsize;
-  nbits = *hz;//因为前几行可能会有0数据长度行的情况，所以前面huffsize 已经保存了第一个非零的行，以此为起点构建
-  while (*hz)//遍历保存的16位对应长度的数据
+  nbits = *hz; //因为前几行可能会有0数据长度行的情况，所以前面huffsize 已经保存了第一个非零的行，以此为起点构建
+  while (*hz)  //遍历保存的16位对应长度的数据
   {
-    while (*hz == nbits)//解析出来的前16位hex是代表对应行数据量的大小，在前面构建hz时，就会把同一行，多个数据都赋值位对应行的行数，所以这里需要一次全部拿到对应到行的数据空间
+    while (*hz == nbits) //解析出来的前16位hex是代表对应行数据量的大小，在前面构建hz时，就会把同一行，多个数据都赋值位对应行的行数，所以这里需要一次全部拿到对应到行的数据空间
     {
-      *hc++ = code++;//CGX :对同样bit 长度的赋予长度相同的2进制值，这些值即树结构上对应索引值
+      *hc++ = code++; // CGX :对同样bit 长度的赋予长度相同的2进制值，这些值即树结构上对应索引值
       hz++;
     }
-    code <<= 1;//code切换到下一个码长的范围 |(00),(01)2|(100),(101),(111)3|(1000)(1001)....4|...  赋值遵循C_j=(C_{j-k}+1)<<K
+    code <<= 1; // code切换到下一个码长的范围 |(00),(01)2|(100),(101),(111)3|(1000)(1001)....4|...  赋值遵循C_j=(C_{j-k}+1)<<K
     nbits++;
   }
   //以上实际已经将所有符号和值一一对应起来，其中code按顺序储存在huffcode,symbol 则隐含在huffsize里面
@@ -452,22 +453,22 @@ static void build_huffman_table(const unsigned char *bits, const unsigned char *
    * Build the lookup table, and the slowtable if needed.
    */
   next_free_entry = -1;
-  for (i = 0; huffsize[i]; i++)//遍历所有有长度的行的每个节点，只要存在节点(not null)就不会停止
+  for (i = 0; huffsize[i]; i++) //遍历所有有长度的行的每个节点，只要存在节点(not null)就不会停止
   {
-    val = vals[i];//获取每个symbol，即每个会被霍夫曼树映射的原值
-    code = huffcode[i];//symbol 对应的 二进制值
-    code_size = huffsize[i];//symbol所代表的二进制数所用的位数长度
+    val = vals[i];           //获取每个symbol，即每个会被霍夫曼树映射的原值
+    code = huffcode[i];      // symbol 对应的 二进制值
+    code_size = huffsize[i]; // symbol所代表的二进制数所用的位数长度
 
-    trace("val=%2.2x code=%8.8x codesize=%2.2d\n", val, code, code_size);// val=symbol(被映射为树的原值) code=二进制代表(树节点) codesize=所使用的二级制长度(树深度)
+    trace("val=%2.2x code=%8.8x codesize=%2.2d\n", val, code, code_size); // val=symbol(被映射为树的原值) code=二进制代表(树节点) codesize=所使用的二级制长度(树深度)
 
-    //table->code_size 是一个512=2^9的数组，所以可以保存0->2^9数据中的任一位，且能够直接索引
-    table->code_size[val] = code_size;//开始构建树，先将树中对应到的symble 位置的数据赋予对应的长度值占位，多个不同的symble有可能长度值相同
-    if (code_size <= HUFFMAN_HASH_NBITS)//长度短于9的，直接通过缓存的方式创建映射，空间换时间
+    // table->code_size 是一个512=2^9的数组，所以可以保存0->2^9数据中的任一位，且能够直接索引
+    table->code_size[val] = code_size;   //开始构建树，先将树中对应到的symble 位置的数据赋予对应的长度值占位，多个不同的symble有可能长度值相同
+    if (code_size <= HUFFMAN_HASH_NBITS) //长度短于9的，直接通过缓存的方式创建映射，空间换时间
     {
       /*
        * Good: val can be put in the lookup table, so fill all value of this
        * column with value val
-       * 
+       *
        */
       /*
         按照如下的结构，lookup数组有512即2^9,为9层的树结构,将二进制最短的数据放在最深的位置，这样二进制短的可以更快(因为数量更多)被匹配到，然后越长的二进制索引则越靠上(类似于升级打怪,到顶部的二进制实际上没有几个，遇到的可能性没有最底下的高)
@@ -486,10 +487,10 @@ static void build_huffman_table(const unsigned char *bits, const unsigned char *
     else
     {
       /* Perhaps sorting the array will be an optimization */
-      uint16_t *slowtable = table->slowtable[code_size - HUFFMAN_HASH_NBITS - 1];//是一个7个长度为
-      while (slowtable[0])//只能遍历7次，大于9的只有剩下的7个长度的数据
-        slowtable += 2;   //当前的索引已经被占用，遍历到最后一个没有占用的为止
-      slowtable[0] = code;//CG:有必要为3个值设置如此大的空间吗(256)意义是什么？是不是可以优化掉？
+      uint16_t *slowtable = table->slowtable[code_size - HUFFMAN_HASH_NBITS - 1]; //是一个7个长度为
+      while (slowtable[0])                                                        //只能遍历7次，大于9的只有剩下的7个长度的数据
+        slowtable += 2;                                                           //当前的索引已经被占用，遍历到最后一个没有占用的为止
+      slowtable[0] = code;                                                        // CG:有必要为3个值设置如此大的空间吗(256)意义是什么？是不是可以优化掉？
       slowtable[1] = val;
       slowtable[2] = 0;
       /* TODO: NEED TO CHECK FOR AN OVERFLOW OF THE TABLE */
@@ -1417,6 +1418,24 @@ static void decode_MCU_2x1_1plane(struct jdec_private *priv)
 }
 
 /*
+  1.420的图片,意味着4y1u1v,为了让所有通道的数据量都为64的整数倍,需要有4*64 y 1*64u 1*64v ,
+    即需要同步解析4个y数据单元(单个数据单元大小为8*8=64)组成一个单独的MCU(Minimum Coded Unit最小编码单元)
+  2.由1可知，针对yuv420，解码一个MCU，需要解码出4*64个y，1*64个u和1*64个v，对于yuv420，其chroma分量是
+    使用相邻两行采样的方式，假设第一行采样了u分量，则第二行只采样v分量，这样对于chroma数据可以少一半而又
+    不至于影响图片质量
+    y u y   y u y   y u y   y u y 
+    y v y   y v y   y v y   y v y
+    ....
+    如上，一般8*8的luma 单元，按420只会有16个u单元和16个v单元，这样不利于储存，
+    为了便于chroma 分量能够直接成为8*8 矩阵保存,jpeg 在编码过程中，将luma分量使用了
+    隔行扫描的方式，sos里保存的数据，按顺序先为解析数据单元1和2的y 数据,按顺序分别为
+    数据单元1的1,3,5,7行，数据单元1解析结束后到数据单元2,依旧按顺序1,3,5,7,这样解析
+    完sos遇到的第一8*8数据块之后，一半MCU单元的奇数行数据就解析出来了，同样的方法，
+    对sos之后的一个64数据解析，得到偶数行数据，两者结合即为MCU上半部分y数据。
+    这样对于储存数据来说是方便的，不用解析64个y后把16个v和u变量存起来，可以继续解析，也
+    利于避免丢失部分块后颜色完全无法显示正常(按照16u/v要考虑丢失的情况)，当然这仅局限于420和422，
+    yuv444则最符合个人认知。
+
  * Decode a 2x2
  *  .-------.
  *  | 1 | 2 |
@@ -1426,13 +1445,15 @@ static void decode_MCU_2x1_1plane(struct jdec_private *priv)
  */
 static void decode_MCU_2x2_3planes(struct jdec_private *priv)
 {
+  // trace("decode_MCU_2x2_3planes\n");//CGX3 run here
+
   // Y
   process_Huffman_data_unit(priv, cY);
-  IDCT(&priv->component_infos[cY], priv->Y, 16);
+  IDCT(&priv->component_infos[cY], priv->Y, 16); // (struct component *compptr, uint8_t *output_buf, int stride);
   process_Huffman_data_unit(priv, cY);
-  IDCT(&priv->component_infos[cY], priv->Y + 8, 16);
+  IDCT(&priv->component_infos[cY], priv->Y + 8, 16); 
   process_Huffman_data_unit(priv, cY);
-  IDCT(&priv->component_infos[cY], priv->Y + 64 * 2, 16);
+  IDCT(&priv->component_infos[cY], priv->Y + 64 * 2, 16); //第三个数据单位储存在64*2之后
   process_Huffman_data_unit(priv, cY);
   IDCT(&priv->component_infos[cY], priv->Y + 64 * 2 + 8, 16);
 
@@ -1555,7 +1576,7 @@ static void print_SOF(const unsigned char *stream)
 /**
  * qtable: 空白的量化表结构
  * ref_table: 来自文件流信息中的实际数据，4*16=64 个量化信息，按照正常的线性排列(左到右，上到下)
-*/
+ */
 static void build_quantization_table(float *qtable, const unsigned char *ref_table)
 {
   /* Taken from libjpeg. Copyright Independent JPEG Group's LLM idct.
@@ -1569,27 +1590,27 @@ static void build_quantization_table(float *qtable, const unsigned char *ref_tab
    */
   int i, j;
   static const double aanscalefactor[8] = {
-      1.0, 1.387039845, 1.306562965, 1.175875602,1.0, 0.785694958, 0.541196100, 0.275899379};
-       // CGX 量化矩阵 https://programs.wiki/wiki/jpeg-coding-principle-file-format-and-code-analysis.html
-       // https://www.orgleaf.com/4018.html JPEG规定的量化表考虑了人眼视觉特性对不同频率分量的敏感特性：对低频敏感，对高频不敏感，因此对低频数据采用了细量化，对高频数据采用了粗量化。
-  const unsigned char *zz = zigzag;         //CGX 曲折扫描法
+      1.0, 1.387039845, 1.306562965, 1.175875602, 1.0, 0.785694958, 0.541196100, 0.275899379};
+  // CGX 量化矩阵 https://programs.wiki/wiki/jpeg-coding-principle-file-format-and-code-analysis.html
+  // https://www.orgleaf.com/4018.html JPEG规定的量化表考虑了人眼视觉特性对不同频率分量的敏感特性：对低频敏感，对高频不敏感，因此对低频数据采用了细量化，对高频数据采用了粗量化。
+  const unsigned char *zz = zigzag; // CGX 曲折扫描法
 
-  //CGX:两个for循环做一个8*8=64的量化表
+  // CGX:两个for循环做一个8*8=64的量化表
   for (i = 0; i < 8; i++)
   {
     for (j = 0; j < 8; j++)
     {
-      *qtable++ = ref_table[*zz++] * aanscalefactor[i] * aanscalefactor[j];//CGX 使用量化矩阵将源数据的量化表再量化一次,数据源ref_table的默认排列不是zigzag，所以这里也用了zigzag的方法去索引到对应位置的数据
+      *qtable++ = ref_table[*zz++] * aanscalefactor[i] * aanscalefactor[j]; // CGX 使用量化矩阵将源数据的量化表再量化一次,数据源ref_table的默认排列不是zigzag，所以这里也用了zigzag的方法去索引到对应位置的数据
     }
   }
 }
 
 /**
- * @brief 
- * 
+ * @brief
+ *
  * @param priv jdec结构体指针
  * @param stream 原始图片流指针,初始指向DQT mark后的一块地址，代表DQT信息总长度
- * @return int 
+ * @return int
  */
 static int parse_DQT(struct jdec_private *priv, const unsigned char *stream)
 {
@@ -1607,10 +1628,10 @@ static int parse_DQT(struct jdec_private *priv, const unsigned char *stream)
 #if SANITY_CHECK // CGX 完整性检查
     if (qi >> 4)
       error("16 bits quantization table is not supported\n");
-    if (qi > 4)//CGX 当前最多支持3个量化表
+    if (qi > 4) // CGX 当前最多支持3个量化表
       error("No more 4 quantization table is supported (got %d)\n", qi);
 #endif
-    table = priv->Q_tables[qi];//CGX:一个三行64列的结构，用于存放量化信息
+    table = priv->Q_tables[qi]; // CGX:一个三行64列的结构，用于存放量化信息
     build_quantization_table(table, stream);
     stream += 64;
   }
@@ -1618,6 +1639,13 @@ static int parse_DQT(struct jdec_private *priv, const unsigned char *stream)
   return 0;
 }
 
+/**
+ * @brief 解析SOF块(SOI->APP0->DQT->SOF)
+ *
+ * @param priv
+ * @param stream
+ * @return int
+ */
 static int parse_SOF(struct jdec_private *priv, const unsigned char *stream)
 {
   int i, width, height, nr_components, cid, sampling_factor;
@@ -1628,10 +1656,10 @@ static int parse_SOF(struct jdec_private *priv, const unsigned char *stream)
   print_SOF(stream);
 
   //宽高计算因为涉及到16位转换，只能通过地址索引
-  height = be16_to_cpu(stream + 3);//SOF mark后第4个字节代表高度
-  width = be16_to_cpu(stream + 5);//SOF mark后第5个字节代表宽度
-  //component 不需要做hex转换，所以可以通过数组下标直接获取
-  nr_components = stream[7];//SOF mark 后第7位代表nr_components(颜色分量(number of color components))
+  height = be16_to_cpu(stream + 3); // SOF mark后第4个字节代表高度
+  width = be16_to_cpu(stream + 5);  // SOF mark后第5个字节代表宽度
+  // component 不需要做hex转换，所以可以通过数组下标直接获取
+  nr_components = stream[7]; // SOF mark 后第7位代表nr_components(颜色分量(number of color components))
 #if SANITY_CHECK
   if (stream[2] != 8)
     error("Precision other than 8 is not supported\n");
@@ -1647,13 +1675,13 @@ static int parse_SOF(struct jdec_private *priv, const unsigned char *stream)
   stream += 8;
   for (i = 0; i < nr_components; i++)
   {
-    cid = *stream++;//component id号
+    cid = *stream++; // component id号
     sampling_factor = *stream++;
     Q_table = *stream++;
-    c = &priv->component_infos[i];//CGX 设置组件id号，在sos段中将用于索引(组件id(色彩通道))
+    c = &priv->component_infos[i]; // CGX 遍历可以设置的组件，设置组件id(cid), 采样方式，使用的量化表编号，在sos段中将用于索引(组件id(色彩通道))
 #if SANITY_CHECK
     c->cid = cid;
-    if (Q_table >= COMPONENTS)//量化表和组件号是对应的,允许多个factor使用同一个量化表?
+    if (Q_table >= COMPONENTS) //量化表和组件号是对应的,允许多个factor使用同一个量化表?
       error("Bad Quantization table index (got %d, max allowed %d)\n", Q_table, COMPONENTS - 1);
 #endif
     c->Vfactor = sampling_factor & 0xf; //垂直方向的样本因子(vertical sample factor)
@@ -1673,7 +1701,7 @@ static int parse_SOF(struct jdec_private *priv, const unsigned char *stream)
 static int parse_SOS(struct jdec_private *priv, const unsigned char *stream)
 {
   unsigned int i, cid, table;
-  unsigned int nr_components = stream[2];//图像通道数量(Y,U,V)
+  unsigned int nr_components = stream[2]; //图像通道数量(Y,U,V)
 
   trace("> SOS marker\n");
 
@@ -1686,22 +1714,23 @@ static int parse_SOS(struct jdec_private *priv, const unsigned char *stream)
   //设定不同通道数据会使用的哈夫曼编码树
   for (i = 0; i < nr_components; i++)
   {
-    cid = *stream++;//component id
-    table = *stream++;  //一个hex用于表示对应通道使用的哈曼夫编码表编号
+    cid = *stream++;   // component id
+    table = *stream++; //一个hex用于表示对应通道使用的哈曼夫编码表编号
 #if SANITY_CHECK
     if ((table & 0xf) >= 4)
       error("We do not support more than 2 AC Huffman table\n");
     if ((table >> 4) >= 4)
       error("We do not support more than 2 DC Huffman table\n");
-    if (cid != priv->component_infos[i].cid)//CGX 在SOF中获取到图片通道id(component id),会需要在这里矫正一次
+    if (cid != priv->component_infos[i].cid) // CGX 在SOF中获取到图片通道id(component id),会需要在这里矫正一次
       error("SOS cid order (%d:%d) isn't compatible with the SOF marker (%d:%d)\n",
             i, cid, i, priv->component_infos[i].cid);
-    trace("ComponentId:%d  tableAC:%d tableDC:%d,table:%d\n", cid, table & 0xf, table >> 4,table);
+    trace("ComponentId:%d  tableAC:%d tableDC:%d,table:%d\n", cid, table & 0xf, table >> 4, table);
 #endif
-    priv->component_infos[i].AC_table = &priv->HTAC[table & 0xf];//设置几个不同的通道会使用的哈夫曼编码树
-    priv->component_infos[i].DC_table = &priv->HTDC[table >> 4];
+    //设定组件使用的霍夫曼编码表,AC和DC中分别可以包含多张表
+    priv->component_infos[i].AC_table = &priv->HTAC[table & 0xf]; //低4位是ac对应的表号
+    priv->component_infos[i].DC_table = &priv->HTDC[table >> 4];  //高4位是dc对应的表号
   }
-  priv->stream = stream + 3;//
+  priv->stream = stream + 3; //组件对应的编码表和ac，dc信息确认后，将保存sos中开始解析的位置用于decode。
   trace("< SOS marker\n");
   return 0;
 }
@@ -1709,9 +1738,9 @@ static int parse_SOS(struct jdec_private *priv, const unsigned char *stream)
 /**
  * @brief 霍夫曼编码树
  * 获取jpg文件携带的霍夫曼编码
- * @param priv 
- * @param stream 
- * @return int 
+ * @param priv
+ * @param stream
+ * @return int
  */
 static int parse_DHT(struct jdec_private *priv, const unsigned char *stream)
 {
@@ -1719,40 +1748,40 @@ static int parse_DHT(struct jdec_private *priv, const unsigned char *stream)
   unsigned char huff_bits[17];
   int length, index;
 
-  length = be16_to_cpu(stream) - 2;//CGX 长度包含两个hex 值，eg:00 A3 = 163
-  stream += 2; /* Skip length */
+  length = be16_to_cpu(stream) - 2; // CGX 长度包含两个hex 值，eg:00 A3 = 163
+  stream += 2;                      /* Skip length */
 
   trace("> DHT marker (length=%d)\n", length);
 
   while (length > 0)
   {
-    index = *stream++;//高 4 位为 0，表示 DC(直流）哈夫曼表。低 4 位表示哈夫曼表的 ID。
+    index = *stream++; //高 4 位为 0，表示 DC(直流）哈夫曼表。低 4 位表示哈夫曼表的 ID。
 
     /* We need to calculate the number of bytes 'vals' will takes */
     huff_bits[0] = 0;
     count = 0;
-    for (i = 1; i < 17; i++)//CGX: 刚好遍历16个字节,对应 范式哈夫曼编码 的16个bits
+    for (i = 1; i < 17; i++) // CGX: 刚好遍历16个字节,对应 范式哈夫曼编码 的16个bits
     {
-      huff_bits[i] = *stream++;//按顺序，将最前面的16个hex放到16个bits中，这16个hex数字描述 Code Length 的个数(Number)
-      count += huff_bits[i];//CGX: 总计所有code的数量
+      huff_bits[i] = *stream++; //按顺序，将最前面的16个hex放到16个bits中，这16个hex数字描述 Code Length 的个数(Number)
+      count += huff_bits[i];    // CGX: 总计所有code的数量
     }
 #if SANITY_CHECK
     if (count >= HUFFMAN_BITS_SIZE)
       error("No more than %d bytes is allowed to describe a huffman table", HUFFMAN_BITS_SIZE);
-    if ((index & 0xf) >= HUFFMAN_TABLES)//最多支持3个霍夫曼编码树(低4位确认id)
+    if ((index & 0xf) >= HUFFMAN_TABLES) //最多支持3个霍夫曼编码树(低4位确认id)
       error("No more than %d Huffman tables is supported (got %d)\n", HUFFMAN_TABLES, index & 0xf);
     trace("Huffman table %s[%d] length=%d\n", (index & 0xf0) ? "AC" : "DC", index & 0xf, count);
 #endif
 
-    if (index & 0xf0)//高四位判断DC(0)直流分量,AC(0)交流分量
-      build_huffman_table(huff_bits, stream, &priv->HTAC[index & 0xf]);//CGX:构建霍夫曼编码表，AC
+    if (index & 0xf0)                                                   //高四位判断是DC还是AC，  DC(0)直流分量,AC(1)交流分量
+      build_huffman_table(huff_bits, stream, &priv->HTAC[index & 0xf]); // CGX:构建霍夫曼编码表，AC
     else
-      build_huffman_table(huff_bits, stream, &priv->HTDC[index & 0xf]);//DC，这里再&上是为了获取到霍夫曼编码树id
+      build_huffman_table(huff_bits, stream, &priv->HTDC[index & 0xf]); // DC，这里再&上是为了获取到霍夫曼编码树id
 
-    length -= 1;//减去头部标识index的长度
-    length -= 16;//减去16位长度表示所用长度
-    length -= count;//减去symbol所用的长度
-    stream += count;//继续解析下一个霍夫曼编码表,一般包含ac，dc，以及多个不同编码标签的霍夫曼编码表
+    length -= 1;     //减去头部标识index的长度
+    length -= 16;    //减去16位长度表示所用长度
+    length -= count; //减去symbol所用的长度
+    stream += count; //继续解析下一个霍夫曼编码表,一般包含ac，dc，以及多个不同编码标签的霍夫曼编码表
   }
   trace("< DHT marker\n");
   return 0;
@@ -1847,21 +1876,20 @@ static int parse_JFIF(struct jdec_private *priv, const unsigned char *stream)
     if (*stream++ != 0xff) // CGX 所有块以FF开头
       goto bogus_jpeg_format;
     /* Skip any padding ff byte (this is normal) */
-    while (*stream == 0xff)//当匹配到第一个FF后，忽略后面遇到的其他FF(jpg允许FF后跟无限个FF)
+    while (*stream == 0xff) //当匹配到第一个FF后，忽略后面遇到的其他FF(jpg允许FF后跟无限个FF)
       stream++;
 
     marker = *stream++; // CGX 无符号字符范围(0-255)刚好用于解析hex
     //  printf(">>>CGX(%d)(%d)(%d)\n",stream[0]<<8,stream[0],stream[1]);
-    chuck_len = be16_to_cpu(stream); // CGX 起始字节FF和maker字节后的两个字节为chunk的长度信息，需要将高8为和低8位数据结合到一起计算。这里用到了be16函数，本质是将前一个字节的数据放在高8位(左移)，后一个字节放在低8位最终得到int32数据即为chunk 长度
-    next_chunck = stream + chuck_len;// CGX 通过chuck len和当前chunk头的指针地址，获取到下一个chuck的位置
-    
+    chuck_len = be16_to_cpu(stream);  // CGX 起始字节FF和maker字节后的两个字节为chunk的长度信息，需要将高8为和低8位数据结合到一起计算。这里用到了be16函数，本质是将前一个字节的数据放在高8位(左移)，后一个字节放在低8位最终得到int32数据即为chunk 长度
+    next_chunck = stream + chuck_len; // CGX 通过chuck len和当前chunk头的指针地址，获取到下一个chuck的位置
 
     switch (marker) // CGX maker 字节区分不同chunk 的作用，jpeg解码chunk顺序(SOI(图片起点),APP0(文件信息),DQT(量化表),SOF0(帧头?),DHT(霍夫曼编码表),SOS(Start of scan,实际的文件信息),EOI(文件末尾))
     {
     case APP0:
       // printf("Now is Application 0\n");          //SOI后的chunk
       break;
-    case SOF:  //0xC0   Start of Frame              //解析完DQT后，就到到SOF
+    case SOF: // 0xC0   Start of Frame              //解析完DQT后，就到到SOF
       if (parse_SOF(priv, stream) < 0)
         return -1;
       break;
@@ -1869,12 +1897,12 @@ static int parse_JFIF(struct jdec_private *priv, const unsigned char *stream)
       if (parse_DQT(priv, stream) < 0)
         return -1;
       break;
-    case SOS: //Start of Scan 获取通道(组件)id和对应使用的霍夫曼编码树
+    case SOS: // Start of Scan 获取通道(组件)id和对应使用的霍夫曼编码树
       if (parse_SOS(priv, stream) < 0)
         return -1;
-      sos_marker_found = 1;//当发现sos标签时，代表可以开始解码，会跳出chunk的识别循环
+      sos_marker_found = 1; //当发现sos标签时，代表可以开始解码，会跳出chunk的识别循环
       break;
-    case DHT: //CGX 0xC4 霍夫曼编码表,一些图片的DHT会在SOF之后，
+    case DHT: // CGX 0xC4 霍夫曼编码表,一些图片的DHT会在SOF之后，
       if (parse_DHT(priv, stream) < 0)
         return -1;
       dht_marker_found = 1;
@@ -1891,13 +1919,13 @@ static int parse_JFIF(struct jdec_private *priv, const unsigned char *stream)
     stream = next_chunck;
   }
 
-  if (!dht_marker_found)//CGX 如果前面解析结束了没有找到设定的huffman编码表，则使用默认的
+  if (!dht_marker_found) // CGX 如果前面解析结束了没有找到设定的huffman编码表，则使用默认的
   {
     trace("No Huffman table loaded, using the default one\n");
-    build_default_huffman_tables(priv);//CGX check how to load default
+    build_default_huffman_tables(priv); // CGX check how to load default
   }
 
-#ifdef SANITY_CHECK//CGX:完整性检查
+#ifdef SANITY_CHECK // CGX:完整性检查
   if ((priv->component_infos[cY].Hfactor < priv->component_infos[cCb].Hfactor) || (priv->component_infos[cY].Hfactor < priv->component_infos[cCr].Hfactor))
     error("Horizontal sampling factor for Y should be greater than horitontal sampling factor for Cb or Cr\n");
   if ((priv->component_infos[cY].Vfactor < priv->component_infos[cCb].Vfactor) || (priv->component_infos[cY].Vfactor < priv->component_infos[cCr].Vfactor))
@@ -1966,7 +1994,7 @@ int tinyjpeg_parse_header(struct jdec_private *priv, const unsigned char *buf, u
   int ret;
 
   /* Identify the file */
-  if ((buf[0] != 0xFF) || (buf[1] != SOI))//CGX:JPG文件格式以0xFFD8开头
+  if ((buf[0] != 0xFF) || (buf[1] != SOI)) // CGX:JPG文件格式以0xFFD8开头
     error("Not a JPG file ?\n");
 
   priv->stream_begin = buf + 2;
@@ -2030,8 +2058,8 @@ int tinyjpeg_decode(struct jdec_private *priv, int pixfmt)
   unsigned int x, y, xstride_by_mcu, ystride_by_mcu;
   unsigned int bytes_per_blocklines[3], bytes_per_mcu[3];
   decode_MCU_fct decode_MCU;
-  const decode_MCU_fct *decode_mcu_table;//函数指针,针对不同数据使用不同的解码方式
-  const convert_colorspace_fct *colorspace_array_conv;//针对不同的色彩方式使用不同的解码函数
+  const decode_MCU_fct *decode_mcu_table;              //函数指针,针对不同数据使用不同的解码方式
+  const convert_colorspace_fct *colorspace_array_conv; //针对不同输出的色彩方式使用不同的编码函数(不是encode，只是为了把文件独立分开)
   convert_colorspace_fct convert_to_pixfmt;
 
   if (setjmp(priv->jump_state))
@@ -2043,21 +2071,21 @@ int tinyjpeg_decode(struct jdec_private *priv, int pixfmt)
   bytes_per_blocklines[1] = 0;
   bytes_per_blocklines[2] = 0;
 
-  decode_mcu_table = decode_mcu_3comp_table;//CGX togo ...
+  decode_mcu_table = decode_mcu_3comp_table; // CGX togo ...
   switch (pixfmt)
   {
   case TINYJPEG_FMT_YUV420P:
     colorspace_array_conv = convert_colorspace_yuv420p;
     if (priv->components[0] == NULL)
-      priv->components[0] = (uint8_t *)malloc(priv->width * priv->height);//灰度部分，按照像素大小创建一块缓冲
+      priv->components[0] = (uint8_t *)malloc(priv->width * priv->height); //灰度部分，按照像素大小创建一块缓冲
     if (priv->components[1] == NULL)
-      priv->components[1] = (uint8_t *)malloc(priv->width * priv->height / 4);//uv 部分，在420的情况下4:2:0,即4个灰度1个色彩信息
+      priv->components[1] = (uint8_t *)malloc(priv->width * priv->height / 4); // uv 部分，在420的情况下4:2:0,即4个灰度1个色彩信息
     if (priv->components[2] == NULL)
       priv->components[2] = (uint8_t *)malloc(priv->width * priv->height / 4);
     bytes_per_blocklines[0] = priv->width;
     bytes_per_blocklines[1] = priv->width / 4;
     bytes_per_blocklines[2] = priv->width / 4;
-    bytes_per_mcu[0] = 8;
+    bytes_per_mcu[0] = 8; // CGX why here is 8:4:4
     bytes_per_mcu[1] = 4;
     bytes_per_mcu[2] = 4;
     break;
@@ -2092,11 +2120,12 @@ int tinyjpeg_decode(struct jdec_private *priv, int pixfmt)
     return -1;
   }
 
+  // printf("[CGX][%s][%d],Hfactor(%d),Vfactor(%d)\n",__FUNCTION__,__LINE__,priv->component_infos[cY].Hfactor,priv->component_infos[cY].Vfactor);
   xstride_by_mcu = ystride_by_mcu = 8;
-  if ((priv->component_infos[cY].Hfactor | priv->component_infos[cY].Vfactor) == 1)
+  if ((priv->component_infos[cY].Hfactor | priv->component_infos[cY].Vfactor) == 1) // 判断luma 采样方式,yuv420因为极限压缩chrmoa 分量，实际上可以认为其luma是2*2采样
   {
-    decode_MCU = decode_mcu_table[0];
-    convert_to_pixfmt = colorspace_array_conv[0];
+    decode_MCU = decode_mcu_table[0];             //不同采样方式使用不同的解码函数
+    convert_to_pixfmt = colorspace_array_conv[0]; //同上，使用指定的颜色解析函数
     trace("Use decode 1x1 sampling\n");
   }
   else if (priv->component_infos[cY].Hfactor == 1)
@@ -2110,8 +2139,8 @@ int tinyjpeg_decode(struct jdec_private *priv, int pixfmt)
   {
     decode_MCU = decode_mcu_table[3];
     convert_to_pixfmt = colorspace_array_conv[3];
-    xstride_by_mcu = 16;
-    ystride_by_mcu = 16;
+    xstride_by_mcu = 16; 
+    ystride_by_mcu = 16;//yuv420，使用64*4的做为一个MCU,即16*16的大方块
     trace("Use decode 2x2 sampling\n");
   }
   else
@@ -2122,7 +2151,7 @@ int tinyjpeg_decode(struct jdec_private *priv, int pixfmt)
     trace("Use decode 2x1 sampling\n");
   }
 
-  resync(priv);
+  resync(priv); //初始化
 
   /* Don't forget to that block can be either 8 or 16 lines */
   bytes_per_blocklines[0] *= ystride_by_mcu;
@@ -2133,8 +2162,9 @@ int tinyjpeg_decode(struct jdec_private *priv, int pixfmt)
   bytes_per_mcu[1] *= xstride_by_mcu / 8;
   bytes_per_mcu[2] *= xstride_by_mcu / 8;
 
+  printf("[CGX][%s][%d],Hfactor(%d),Vfactor(%d)\n",__FUNCTION__,__LINE__,;
   /* Just the decode the image by macroblock (size is 8x8, 8x16, or 16x16) */
-  for (y = 0; y < priv->height / ystride_by_mcu; y++)
+  for (y = 0; y < priv->height / ystride_by_mcu; y++)//
   {
     // trace("Decoding row %d\n", y);
     priv->plane[0] = priv->components[0] + (y * bytes_per_blocklines[0]);
@@ -2142,8 +2172,8 @@ int tinyjpeg_decode(struct jdec_private *priv, int pixfmt)
     priv->plane[2] = priv->components[2] + (y * bytes_per_blocklines[2]);
     for (x = 0; x < priv->width; x += xstride_by_mcu)
     {
-      decode_MCU(priv);
-      convert_to_pixfmt(priv);
+      decode_MCU(priv);        //实际解码函数和idtc实作
+      convert_to_pixfmt(priv); //导出为指定格式
       priv->plane[0] += bytes_per_mcu[0];
       priv->plane[1] += bytes_per_mcu[1];
       priv->plane[2] += bytes_per_mcu[2];
