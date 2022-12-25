@@ -680,8 +680,8 @@ static void YCrCB_to_YUV420P_2x2(struct jdec_private *priv)
   for (i = 0; i < 16; i++)
   {
     memcpy(p, y1, 16);
-    p += priv->width;
-    y1 += 16;
+    p += priv->width;//plane指向最终储存解码数据的component,存完MUC的一行后需要跳到下一行继续存,即+width
+    y1 += 16;//yuv420为了照顾chroma 分量，luma 分量扩展到16*16的大小，跳转下一行即＋16
   }
 
   p = priv->plane[1];
@@ -1417,6 +1417,8 @@ static void decode_MCU_2x1_1plane(struct jdec_private *priv)
   process_Huffman_data_unit(priv, cCr);
 }
 
+
+//tinyjpeg 这份代码暂时只支持以16为倍数的解码，后续将加上逻辑
 /*
   1.420的图片,意味着4y1u1v,为了让所有通道的数据量都为64的整数倍,需要有4*64 y 1*64u 1*64v ,
     即需要同步解析4个y数据单元(单个数据单元大小为8*8=64)组成一个单独的MCU(Minimum Coded Unit最小编码单元)
@@ -2066,7 +2068,7 @@ int tinyjpeg_decode(struct jdec_private *priv, int pixfmt)
     return -1;
 
   /* To keep gcc happy initialize some array */
-  bytes_per_mcu[1] = 0;
+  bytes_per_mcu[1] = 0; //对应不同mcu需要采用的步长
   bytes_per_mcu[2] = 0;
   bytes_per_blocklines[1] = 0;
   bytes_per_blocklines[2] = 0;
@@ -2162,19 +2164,19 @@ int tinyjpeg_decode(struct jdec_private *priv, int pixfmt)
   bytes_per_mcu[1] *= xstride_by_mcu / 8;
   bytes_per_mcu[2] *= xstride_by_mcu / 8;
 
-  printf("[CGX][%s][%d],Hfactor(%d),Vfactor(%d)\n",__FUNCTION__,__LINE__,;
+  printf("[CGX][%s][%d],bytes_per_mcu[0](%d),bytes_per_mcu[0](%d),bytes_per_mcu[0](%d),priv->restarts_to_go(%d)\n",__FUNCTION__,__LINE__,bytes_per_mcu[0],bytes_per_mcu[1],bytes_per_mcu[2],priv->restarts_to_go);
   /* Just the decode the image by macroblock (size is 8x8, 8x16, or 16x16) */
-  for (y = 0; y < priv->height / ystride_by_mcu; y++)//
+  for (y = 0; y < priv->height / ystride_by_mcu; y++)//按照MCU的宽度遍历行，y=row count
   {
     // trace("Decoding row %d\n", y);
-    priv->plane[0] = priv->components[0] + (y * bytes_per_blocklines[0]);
+    priv->plane[0] = priv->components[0] + (y * bytes_per_blocklines[0]);//components 为最终导出格式的空间
     priv->plane[1] = priv->components[1] + (y * bytes_per_blocklines[1]);
     priv->plane[2] = priv->components[2] + (y * bytes_per_blocklines[2]);
-    for (x = 0; x < priv->width; x += xstride_by_mcu)
+    for (x = 0; x < priv->width; x += xstride_by_mcu)//按MCU长度遍历列
     {
       decode_MCU(priv);        //实际解码函数和idtc实作
       convert_to_pixfmt(priv); //导出为指定格式
-      priv->plane[0] += bytes_per_mcu[0];
+      priv->plane[0] += bytes_per_mcu[0];//因为是MCU为计算单元大小，但components储存空间是线性且按照图片大小(左上到右下按像素单元)储存，所以这里依旧是以一个MCU为步长做跳转,然后在convert_to_pixfmt()里做换行逻辑
       priv->plane[1] += bytes_per_mcu[1];
       priv->plane[2] += bytes_per_mcu[2];
       if (priv->restarts_to_go > 0)
