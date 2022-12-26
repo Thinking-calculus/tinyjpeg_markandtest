@@ -98,6 +98,7 @@ struct jdec_private
   uint8_t *components[COMPONENTS];
   unsigned int width, height;	/* Size of the image */
   unsigned int flags;
+  unsigned int resized;
 
   /* Private variables */
   const unsigned char *stream_begin, *stream_end;
