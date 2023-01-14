@@ -675,34 +675,64 @@ static void YCrCB_to_YUV420P_2x2(struct jdec_private *priv)
   const unsigned char *s, *y1;
   unsigned int i;
 
-  int diff16x = priv->width % 16;
-  int width_min16x = (priv->width - diff16x); // for yuv 420 (4mcu)
-  int delete_count = 16 - (priv->width % 16);
-  int gaped = 0, index = 0;
-  unsigned char *y_p = priv->components[0];
+  int diff_w_16x = priv->width % 16, diff_h_16x = priv->height % 16;
+  int height_min16x = (priv->height - diff_h_16x);
+  int width_min16x = (priv->width - diff_w_16x); // for yuv 420 (4mcu)
+  int delete_count = 16 - (priv->width % 16);    // CGX 为了完成16block 而多出来的部分，可以直接丢弃
+  int gaped = 0, index = 0, gaped_h = 0;
+  unsigned char *y_p = priv->components[0]; // luma 分量所分配的空间地址
 
-  p = priv->plane[0];
-  index = (p - y_p);
-  printf("[CGX]index(%d),width_min16x(%d),y_p(%x),p(%x)\n", index, width_min16x, y_p, p);
-  if ((index - width_min16x)%priv->width == 0 && index != 0)
+  p = priv->plane[0]; // 当前luma 变量已经保存的数据栈顶位置
+  index = (p - y_p);  // index 为当前已经保存的luma 数据量
+
+  if ((index - width_min16x) % priv->width == 0 && index != 0)
   {
-    gaped = 1;
+    gaped = 1; // 当前的p栈顶指向即将为多余数据分配多余16block的地方，即从这里开始，要丢弃掉部分没有用的数据。这是行数据补16block的适配
     if (test)
     {
       test--;
-      printf("[CGX]index(%d),width_min16x(%d),y_p(%x),p(%x)\n", index, width_min16x, y_p, p);
+      // printf("[CGX]index(%d),width_min16x(%d),y_p(%x),p(%x)\n", index, width_min16x, y_p, p);
     }
   }
-
+  if (index >= (height_min16x * priv->width) && priv->height_resized) // 判断当前指针是否位于即将为高度不足16block而补的位置
+  {
+    // now is the extend row
+    gaped_h = diff_h_16x; // 保存多出来的行数
+    // printf("[CGX]====index(%d),height_min16x(%d),gaped_h(%d)\n", index, height_min16x,gaped_h);
+  }
+  // printf("[CGX]index(%d),gaped_h(%d),height_min16x(%d)\n", index, gaped_h, priv->height * priv->width);
   y1 = priv->Y;
   for (i = 0; i < 16; i++)
   {
-    if (!gaped)
-      memcpy(p, y1, 16);
-    else
-      memcpy(p, y1, 16 - delete_count);
-    p += priv->width; // plane指向最终储存解码数据的component,存完MUC的一行后需要跳到下一行继续存,即+width
-    y1 += 16;         // yuv420为了照顾chroma 分量，luma 分量扩展到16*16的大小，跳转下一行即＋16
+    if (0)
+    {
+      if (!gaped) // CGX 当没有位于需要补16block的地方时，默认保留所有数据
+        memcpy(p, y1, 16);
+      else
+        memcpy(p, y1, 16 - delete_count);
+
+      p += priv->width; // plane指向最终储存解码数据的component,存完MUC的一行后需要跳到下一行继续存,即+width
+      y1 += 16;         // yuv420为了照顾chroma 分量，luma 分量扩展到16*16的大小，跳转下一行即＋16
+    }
+
+    if (1)
+    {
+      if (gaped_h == 0 || (gaped_h != 0 && i < gaped_h))//只保留非补充行的数据
+      {
+        if (!gaped) // CGX 当没有位于需要补16block的地方时，默认保留所有数据
+          memcpy(p, y1, 16);
+        else
+          memcpy(p, y1, 16 - delete_count);
+
+        p += priv->width; // plane指向最终储存解码数据的component,存完MUC的一行后需要跳到下一行继续存,即+width
+        y1 += 16;         // yuv420为了照顾chroma 分量，luma 分量扩展到16*16的大小，跳转下一行即＋16
+      }
+      else
+      {
+        // printf("[CGX]>>>>>>>now break\n");
+        break; // 当遇到第一个为了凑够16block的补充行时，后面的行也都是补充的，可以直接跳过这些行
+      }
+    }
   }
 
   p = priv->plane[1];
@@ -1689,15 +1719,16 @@ static int parse_SOF(struct jdec_private *priv, const unsigned char *stream)
     error("Width and Height (%dx%d) seems suspicious\n", width, height);
   if (nr_components != 3)
     error("We only support YUV images\n");
+
+  priv->height_resized = 0;
   if (height % 16)
   {
-    priv->resized = 1; // 标记当前图片大小不够MCU分解，需要多一部分
+    priv->height_resized = 1; // 标记当前图片高度不够MCU分解，需要多一部分MCU
     // error("Height need to be a multiple of 16 (current height is %d)\n", height);
   }
 
   if (width % 16)
   {
-    priv->resized = 1;
     // error("Width need to be a multiple of 16 (current Width is %d)\n", width);
   }
 
@@ -2113,12 +2144,12 @@ int tinyjpeg_decode(struct jdec_private *priv, int pixfmt)
   {
   case TINYJPEG_FMT_YUV420P:
     colorspace_array_conv = convert_colorspace_yuv420p;
-    if (priv->components[0] == NULL)
-      priv->components[0] = (uint8_t *)malloc(priv->width * priv->height); // 灰度部分，按照像素大小创建一块缓冲
     if (priv->components[1] == NULL)
-      priv->components[1] = (uint8_t *)malloc(priv->width * priv->height / 4); // uv 部分，在420的情况下4:2:0,即4个灰度1个色彩信息
+      priv->components[1] = (uint8_t *)malloc(priv->width * priv->height / 2); // uv 部分，在420的情况下4:2:0,即4个灰度1个色彩信息
     if (priv->components[2] == NULL)
-      priv->components[2] = (uint8_t *)malloc(priv->width * priv->height / 4);
+      priv->components[2] = (uint8_t *)malloc(priv->width * priv->height / 2);
+    if (priv->components[0] == NULL)
+      priv->components[0] = (uint8_t *)malloc(priv->width * priv->height); // 灰度部分，按照像素大小创建一块缓冲。这里把y分量放在前面是为了避免y的内容占用uv 创建出来的空间，而没有出现溢出的情况
     bytes_per_blocklines[0] = priv->width;
     bytes_per_blocklines[1] = priv->width / 4;
     bytes_per_blocklines[2] = priv->width / 4;
@@ -2191,7 +2222,7 @@ int tinyjpeg_decode(struct jdec_private *priv, int pixfmt)
   resync(priv); // 初始化
 
   /* Don't forget to that block can be either 8 or 16 lines */
-  bytes_per_blocklines[0] *= ystride_by_mcu;
+  bytes_per_blocklines[0] *= ystride_by_mcu; // width*mcu
   bytes_per_blocklines[1] *= ystride_by_mcu;
   bytes_per_blocklines[2] *= ystride_by_mcu;
 
@@ -2199,16 +2230,23 @@ int tinyjpeg_decode(struct jdec_private *priv, int pixfmt)
   bytes_per_mcu[1] *= xstride_by_mcu / 8;
   bytes_per_mcu[2] *= xstride_by_mcu / 8;
 
-  printf("[CGX][%s][%d],bytes_per_mcu[0](%d),bytes_per_mcu[0](%d),bytes_per_mcu[0](%d),priv->restarts_to_go(%d)\n", __FUNCTION__, __LINE__, bytes_per_mcu[0], bytes_per_mcu[1], bytes_per_mcu[2], priv->restarts_to_go);
+  printf("[CGX][%s][%d],bytes_per_mcu[0](%d),bytes_per_mcu[1](%d),bytes_per_mcu[2](%d),priv->restarts_to_go(%d),bytes_per_blocklines[0](%d)\n", __FUNCTION__, __LINE__, bytes_per_mcu[0], bytes_per_mcu[1], bytes_per_mcu[2], priv->restarts_to_go, bytes_per_blocklines[0]);
   /* Just the decode the image by macroblock (size is 8x8, 8x16, or 16x16) */
-  for (y = 0; y < priv->height / ystride_by_mcu; y++) // 按照MCU的宽度遍历行，y=row count
+  for (y = 0; y < (priv->height / ystride_by_mcu) + priv->height_resized; y++) // 按照MCU的宽度遍历行，y=row count
   {
     // trace("Decoding row %d\n", y);
+
     priv->plane[0] = priv->components[0] + (y * bytes_per_blocklines[0]); // components 为最终导出格式的空间
     priv->plane[1] = priv->components[1] + (y * bytes_per_blocklines[1]);
     priv->plane[2] = priv->components[2] + (y * bytes_per_blocklines[2]);
     for (x = 0; x < (priv->width); x += xstride_by_mcu) // 按MCU长度遍历列
     {
+      //CGX995
+      // if (y >= priv->height / ystride_by_mcu)
+      // {  
+      //   //位于扩展行时的打印
+      //   printf("[CGX][%s][%d]y(%d)x(%d)<<<<<<<\n", __FUNCTION__, __LINE__, y,x);
+      // }
       decode_MCU(priv);                   // 实际解码函数和idtc实作
       convert_to_pixfmt(priv);            // 导出为指定格式
       priv->plane[0] += bytes_per_mcu[0]; // 因为是MCU为计算单元大小，但components储存空间是线性且按照图片大小(左上到右下按像素单元)储存，所以这里依旧是以一个MCU为步长做跳转,然后在convert_to_pixfmt()里做换行逻辑
