@@ -717,7 +717,7 @@ static void YCrCB_to_YUV420P_2x2(struct jdec_private *priv)
 
     if (1)
     {
-      if (gaped_h == 0 || (gaped_h != 0 && i < gaped_h))//只保留非补充行的数据
+      if (gaped_h == 0 || (gaped_h != 0 && i < gaped_h)) // 只保留非补充行的数据
       {
         if (!gaped) // CGX 当没有位于需要补16block的地方时，默认保留所有数据
           memcpy(p, y1, 16);
@@ -735,7 +735,7 @@ static void YCrCB_to_YUV420P_2x2(struct jdec_private *priv)
     }
   }
 
-  p = priv->plane[1];
+  p = priv->plane[1]; // chroma u
   s = priv->Cb;
   for (i = 0; i < 8; i++)
   {
@@ -744,7 +744,7 @@ static void YCrCB_to_YUV420P_2x2(struct jdec_private *priv)
     p += priv->width / 2;
   }
 
-  p = priv->plane[2];
+  p = priv->plane[2]; // chroma v
   s = priv->Cr;
   for (i = 0; i < 8; i++)
   {
@@ -1510,7 +1510,7 @@ static void decode_MCU_2x2_3planes(struct jdec_private *priv)
   IDCT(&priv->component_infos[cY], priv->Y + 64 * 2 + 8, 16);
 
   // Cb
-  process_Huffman_data_unit(priv, cCb);
+  process_Huffman_data_unit(priv, cCb); // chroma
   IDCT(&priv->component_infos[cCb], priv->Cb, 8);
 
   // Cr
@@ -2230,7 +2230,7 @@ int tinyjpeg_decode(struct jdec_private *priv, int pixfmt)
   bytes_per_mcu[1] *= xstride_by_mcu / 8;
   bytes_per_mcu[2] *= xstride_by_mcu / 8;
 
-  printf("[CGX][%s][%d],bytes_per_mcu[0](%d),bytes_per_mcu[1](%d),bytes_per_mcu[2](%d),priv->restarts_to_go(%d),bytes_per_blocklines[0](%d)\n", __FUNCTION__, __LINE__, bytes_per_mcu[0], bytes_per_mcu[1], bytes_per_mcu[2], priv->restarts_to_go, bytes_per_blocklines[0]);
+  // printf("[CGX][%s][%d],bytes_per_mcu[0](%d),bytes_per_mcu[1](%d),bytes_per_mcu[2](%d),priv->restarts_to_go(%d),bytes_per_blocklines[0](%d)\n", __FUNCTION__, __LINE__, bytes_per_mcu[0], bytes_per_mcu[1], bytes_per_mcu[2], priv->restarts_to_go, bytes_per_blocklines[0]);
   /* Just the decode the image by macroblock (size is 8x8, 8x16, or 16x16) */
   for (y = 0; y < (priv->height / ystride_by_mcu) + priv->height_resized; y++) // 按照MCU的宽度遍历行，y=row count
   {
@@ -2241,12 +2241,12 @@ int tinyjpeg_decode(struct jdec_private *priv, int pixfmt)
     priv->plane[2] = priv->components[2] + (y * bytes_per_blocklines[2]);
     for (x = 0; x < (priv->width); x += xstride_by_mcu) // 按MCU长度遍历列
     {
-      //CGX995
-      // if (y >= priv->height / ystride_by_mcu)
-      // {  
-      //   //位于扩展行时的打印
-      //   printf("[CGX][%s][%d]y(%d)x(%d)<<<<<<<\n", __FUNCTION__, __LINE__, y,x);
-      // }
+      // CGX995
+      //  if (y >= priv->height / ystride_by_mcu)
+      //  {
+      //    //位于扩展行时的打印
+      //    printf("[CGX][%s][%d]y(%d)x(%d)<<<<<<<\n", __FUNCTION__, __LINE__, y,x);
+      //  }
       decode_MCU(priv);                   // 实际解码函数和idtc实作
       convert_to_pixfmt(priv);            // 导出为指定格式
       priv->plane[0] += bytes_per_mcu[0]; // 因为是MCU为计算单元大小，但components储存空间是线性且按照图片大小(左上到右下按像素单元)储存，所以这里依旧是以一个MCU为步长做跳转,然后在convert_to_pixfmt()里做换行逻辑
@@ -2288,8 +2288,17 @@ void tinyjpeg_get_size(struct jdec_private *priv, unsigned int *width, unsigned 
 int tinyjpeg_get_components(struct jdec_private *priv, unsigned char **components)
 {
   int i;
-  for (i = 0; priv->components[i] && i < COMPONENTS; i++)
-    components[i] = priv->components[i];
+  for (i = 0; i < COMPONENTS; i++) // CGX 这里的判断会有问题，暂时摘掉会好
+  {
+    if (priv->components[i] != NULL)
+    {
+      components[i] = priv->components[i];
+    }
+    else
+    {
+      break;
+    }
+  }
   return 0;
 }
 
