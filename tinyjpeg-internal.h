@@ -133,6 +133,8 @@ struct jdec_private
 #define __unlikely(x)     (x)
 #endif
 
+void set_chroma_v();
+
 #define IDCT tinyjpeg_idct_float      //反 离散余弦变换
 void tinyjpeg_idct_float (struct component *compptr, uint8_t *output_buf, int stride);
 

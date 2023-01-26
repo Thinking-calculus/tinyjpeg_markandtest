@@ -113,29 +113,36 @@ static inline unsigned char descale_and_clamp(int x, int shift)
     return x;
 }
 #endif
+int chroma_v = 0;
+void set_chroma_v()
+{
+  chroma_v = 1;
+}
+
 
 // CGX log
-// static int printf_list_count = 6;
-// static int define_count = 0, count_now;
-// static void printf_list(unsigned char *list, int count) // if want show diff type ,change the type of list
-// {
-//   int list_len = 64;
-//   printf("====CGX[%d]====\n", count);
-//   for (; list_len > 0; list_len--)
-//   {
-//     printf("   %d   ", *list++);
-//     if ((list_len - 1) % 8 == 0)
-//       printf("\n");
-//   }
-//   printf("\n====CGX====\n");
-// }
+static int printf_list_count = 200;
+static int define_count = 0, count_now;
+static void printf_list(unsigned char *list, int count) // if want show diff type ,change the type of list
+{
+  int list_len = 64;
+  printf("====CGX[%d]====\n", count);
+  for (; list_len > 0; list_len--)
+  {
+    printf("   %d   ", *list++);
+    if ((list_len - 1) % 8 == 0)
+      printf("\n");
+  }
+  printf("\n====CGX====\n");
+}
 
 /*
  * Perform dequantization and inverse DCT on one block of coefficients.
  */
 void tinyjpeg_idct_float(struct component *compptr, uint8_t *output_buf, int stride)
 {
-  // CGX4
+  // CGX990
+  //  CGX4
   FAST_FLOAT tmp0, tmp1, tmp2, tmp3, tmp4, tmp5, tmp6, tmp7;
   FAST_FLOAT tmp10, tmp11, tmp12, tmp13;
   FAST_FLOAT z5, z10, z11, z12, z13;
@@ -148,9 +155,9 @@ void tinyjpeg_idct_float(struct component *compptr, uint8_t *output_buf, int str
 
   /* Pass 1: process columns from input, store into work array. */
 
-  inptr = compptr->DCT; //获取通过霍夫曼反编码的DCT 表
+  inptr = compptr->DCT; // 获取通过霍夫曼反编码的DCT 表
 
-  quantptr = compptr->Q_table; //获取量化表
+  quantptr = compptr->Q_table; // 获取量化表
   wsptr = workspace;
   for (ctr = DCTSIZE; ctr > 0; ctr--)
   {
@@ -180,7 +187,7 @@ void tinyjpeg_idct_float(struct component *compptr, uint8_t *output_buf, int str
         inptr[DCTSIZE * 7] == 0)
     {
       /* AC terms all zero */
-      FAST_FLOAT dcval = DEQUANTIZE(inptr[DCTSIZE * 0], quantptr[DCTSIZE * 0]); //反量化
+      FAST_FLOAT dcval = DEQUANTIZE(inptr[DCTSIZE * 0], quantptr[DCTSIZE * 0]); // 反量化
 
       wsptr[DCTSIZE * 0] = dcval;
       wsptr[DCTSIZE * 1] = dcval;
@@ -261,7 +268,7 @@ void tinyjpeg_idct_float(struct component *compptr, uint8_t *output_buf, int str
   /* Pass 2: process rows from work array, store into output array. */
   /* Note that we must descale the results by a factor of 8 == 2**3. */
 
-  wsptr = workspace; //反量化后的数据，已经可以直接idct
+  wsptr = workspace; // 反量化后的数据，已经可以直接idct
   outptr = output_buf;
   for (ctr = 0; ctr < DCTSIZE; ctr++)
   {
@@ -321,19 +328,5 @@ void tinyjpeg_idct_float(struct component *compptr, uint8_t *output_buf, int str
     // }
   }
 
-  //CGX log
-  // if (printf_list_count)
-  // {
-  //   count_now++;
-  //   if (define_count == count_now)
-  //   {
-  //     printf_list(outptr, count_now);
-  //     printf_list_count = 0;
-  //   }
-  //   else if (define_count == 0)
-  //   {
-  //     printf_list(outptr, printf_list_count);
-  //   }
-  //   printf_list_count--;
-  // }
+
 }

@@ -660,6 +660,8 @@ static void YCrCB_to_YUV420P_1x2(struct jdec_private *priv)
   }
 }
 
+int chroma_ount = 0;
+
 /**
  *  YCrCb -> YUV420P (2x2)
  *  .-------.
@@ -685,8 +687,9 @@ static void YCrCB_to_YUV420P_2x2(struct jdec_private *priv)
   p = priv->plane[0]; // 当前luma 变量已经保存的数据栈顶位置
   index = (p - y_p);  // index 为当前已经保存的luma 数据量
 
-  if ((index - width_min16x) % priv->width == 0 && index != 0)
+  if ((index - width_min16x) % priv->width == 0 && index != 0 && diff_w_16x != 0)
   {
+    // printf("CGX now chang gaped(%d) ===================================\n", diff_w_16x);
     gaped = 1; // 当前的p栈顶指向即将为多余数据分配多余16block的地方，即从这里开始，要丢弃掉部分没有用的数据。这是行数据补16block的适配
     if (test)
     {
@@ -735,22 +738,82 @@ static void YCrCB_to_YUV420P_2x2(struct jdec_private *priv)
     }
   }
 
+  // printf("[CGX] chroma deocde (%d) ==============================\n",chroma_ount++);
+  int examing = 1;
+
   p = priv->plane[1]; // chroma u
   s = priv->Cb;
   for (i = 0; i < 8; i++)
   {
-    memcpy(p, s, 8);
-    s += 8;
-    p += priv->width / 2;
+
+    if (!examing)
+    {
+      memcpy(p, s, 8);
+      s += 8;
+      p += priv->width / 2;
+    }
+
+    if (examing)
+    {
+      if (gaped_h == 0 || (gaped_h != 0 && i < (gaped_h / 2)))
+      {
+        if (!gaped)
+        {
+          memcpy(p, s, 8);
+          // printf("[CGX] normal store u chroma data=====\n");
+        }
+        else
+        {
+          // printf("[CGX][%s][%d],diff=%d\n", __func__, __LINE__, diff_w_16x / 2);
+          memcpy(p, s, diff_w_16x / 2);
+        }
+        s += 8;
+        p += priv->width / 2;
+      }
+      else
+      {
+        // printf("CGX now is u break===================\n");
+        break;
+      }
+    }
   }
 
   p = priv->plane[2]; // chroma v
   s = priv->Cr;
   for (i = 0; i < 8; i++)
   {
-    memcpy(p, s, 8);
-    s += 8;
-    p += priv->width / 2;
+
+    if (!examing)
+    {
+      memcpy(p, s, 8);
+      s += 8;
+      p += priv->width / 2;
+    }
+
+    if (examing)
+    {
+      if (gaped_h == 0 || (gaped_h != 0 && i < (gaped_h / 2)))
+      {
+        if (!gaped)
+        {
+          memcpy(p, s, 8);
+          // printf("[CGX] normal store v chroma data=====\n");
+        }
+        else
+        {
+          // printf("[CGX][%s][%d],diff=%d\n", __func__, __LINE__, diff_w_16x / 2);
+          memcpy(p, s, diff_w_16x / 2);
+        }
+
+        s += 8;
+        p += priv->width / 2;
+      }
+      else
+      {
+        // printf("CGX now is v break===================\n");
+        break;
+      }
+    }
   }
 }
 
@@ -1468,6 +1531,25 @@ static void decode_MCU_2x1_1plane(struct jdec_private *priv)
   process_Huffman_data_unit(priv, cCr);
 }
 
+static int chroma_v_count = 0;
+
+// CGX log
+static int printf_list_count = 200;
+static int define_count = 0, count_now;
+static void printf_list(unsigned char *list, int count) // if want show diff type ,change the type of list
+{
+  return;
+  int list_len = 64;
+  printf("====CGX[%d]====\n", count);
+  for (; list_len > 0; list_len--)
+  {
+    printf("   %d   ", *list--);
+    if ((list_len - 1) % 8 == 0)
+      printf("\n");
+  }
+  printf("\n====CGX====\n");
+}
+
 // tinyjpeg 这份代码暂时只支持以16为倍数的解码，后续将加上逻辑
 /*
   1.420的图片,意味着4y1u1v,为了让所有通道的数据量都为64的整数倍,需要有4*64 y 1*64u 1*64v ,
@@ -1498,7 +1580,7 @@ static void decode_MCU_2x1_1plane(struct jdec_private *priv)
 static void decode_MCU_2x2_3planes(struct jdec_private *priv)
 {
   // trace("decode_MCU_2x2_3planes\n");//CGX3 run here
-
+  // CGX990
   // Y
   process_Huffman_data_unit(priv, cY);
   IDCT(&priv->component_infos[cY], priv->Y, 16); // (struct component *compptr, uint8_t *output_buf, int stride);
@@ -1512,6 +1594,23 @@ static void decode_MCU_2x2_3planes(struct jdec_private *priv)
   // Cb
   process_Huffman_data_unit(priv, cCb); // chroma
   IDCT(&priv->component_infos[cCb], priv->Cb, 8);
+
+  // CGX log
+  if (printf_list_count)
+  {
+    // printf("[CGX]================ now u count is %d \n",chroma_v_count++);
+    count_now++;
+    if (define_count == count_now)
+    {
+      printf_list(priv->Cb, count_now);
+      printf_list_count = 0;
+    }
+    else if (define_count == 0)
+    {
+      printf_list(priv->Cb, printf_list_count);
+    }
+    printf_list_count--;
+  }
 
   // Cr
   process_Huffman_data_unit(priv, cCr);
@@ -2143,16 +2242,17 @@ int tinyjpeg_decode(struct jdec_private *priv, int pixfmt)
   switch (pixfmt)
   {
   case TINYJPEG_FMT_YUV420P:
+    // CGX996
     colorspace_array_conv = convert_colorspace_yuv420p;
     if (priv->components[1] == NULL)
-      priv->components[1] = (uint8_t *)malloc(priv->width * priv->height / 2); // uv 部分，在420的情况下4:2:0,即4个灰度1个色彩信息
+      priv->components[1] = (uint8_t *)malloc(priv->width * priv->height / 4); // uv 部分，在420的情况下4:2:0,即4个灰度1个色彩信息
     if (priv->components[2] == NULL)
-      priv->components[2] = (uint8_t *)malloc(priv->width * priv->height / 2);
+      priv->components[2] = (uint8_t *)malloc(priv->width * priv->height / 4);
     if (priv->components[0] == NULL)
       priv->components[0] = (uint8_t *)malloc(priv->width * priv->height); // 灰度部分，按照像素大小创建一块缓冲。这里把y分量放在前面是为了避免y的内容占用uv 创建出来的空间，而没有出现溢出的情况
     bytes_per_blocklines[0] = priv->width;
-    bytes_per_blocklines[1] = priv->width / 4;
-    bytes_per_blocklines[2] = priv->width / 4;
+    bytes_per_blocklines[1] = priv->width / 2; // 这种计算方式会导致出现小数而化整的情况，导致精度减低
+    bytes_per_blocklines[2] = priv->width / 2;
     bytes_per_mcu[0] = 8; // CGX why here is 8:4:4
     bytes_per_mcu[1] = 4;
     bytes_per_mcu[2] = 4;
@@ -2187,7 +2287,8 @@ int tinyjpeg_decode(struct jdec_private *priv, int pixfmt)
     trace("Bad pixel format\n");
     return -1;
   }
-
+  printf("[CGX]bytes_per_blocklines[0](%d),bytes_per_blocklines[1](%d),bytes_per_blocklines[2](%d)\n",
+         bytes_per_blocklines[0], bytes_per_blocklines[1], bytes_per_blocklines[2]);
   // printf("[CGX][%s][%d],Hfactor(%d),Vfactor(%d)\n",__FUNCTION__,__LINE__,priv->component_infos[cY].Hfactor,priv->component_infos[cY].Vfactor);
   xstride_by_mcu = ystride_by_mcu = 8;
   if ((priv->component_infos[cY].Hfactor | priv->component_infos[cY].Vfactor) == 1) // 判断luma 采样方式,yuv420因为极限压缩chrmoa 分量，实际上可以认为其luma是2*2采样
@@ -2223,14 +2324,28 @@ int tinyjpeg_decode(struct jdec_private *priv, int pixfmt)
 
   /* Don't forget to that block can be either 8 or 16 lines */
   bytes_per_blocklines[0] *= ystride_by_mcu; // width*mcu
-  bytes_per_blocklines[1] *= ystride_by_mcu;
-  bytes_per_blocklines[2] *= ystride_by_mcu;
+  if (TINYJPEG_FMT_YUV420P == pixfmt)
+  {
+    bytes_per_blocklines[1] *= ystride_by_mcu / 2;
+    bytes_per_blocklines[2] *= ystride_by_mcu / 2;// this fix func is ugly ,need improve it
+  }
+  else
+  {
+    bytes_per_blocklines[1] *= ystride_by_mcu;
+    bytes_per_blocklines[2] *= ystride_by_mcu;
+  }
 
   bytes_per_mcu[0] *= xstride_by_mcu / 8;
   bytes_per_mcu[1] *= xstride_by_mcu / 8;
   bytes_per_mcu[2] *= xstride_by_mcu / 8;
-
-  // printf("[CGX][%s][%d],bytes_per_mcu[0](%d),bytes_per_mcu[1](%d),bytes_per_mcu[2](%d),priv->restarts_to_go(%d),bytes_per_blocklines[0](%d)\n", __FUNCTION__, __LINE__, bytes_per_mcu[0], bytes_per_mcu[1], bytes_per_mcu[2], priv->restarts_to_go, bytes_per_blocklines[0]);
+  printf("[CGX]priv->width*priv->height(%d),ystride_by_mcu(%d)\n", priv->width * priv->height, ystride_by_mcu);
+  printf("[CGX][%s][%d],bytes_per_mcu[0](%d),bytes_per_mcu[1](%d),bytes_per_mcu[2](%d),priv->restarts_to_go(%d),bytes_per_blocklines[0](%d),bytes_per_blocklines[1](%d)\n",
+         __FUNCTION__, __LINE__,
+         bytes_per_mcu[0],
+         bytes_per_mcu[1],
+         bytes_per_mcu[2],
+         priv->restarts_to_go,
+         bytes_per_blocklines[0], bytes_per_blocklines[1]);
   /* Just the decode the image by macroblock (size is 8x8, 8x16, or 16x16) */
   for (y = 0; y < (priv->height / ystride_by_mcu) + priv->height_resized; y++) // 按照MCU的宽度遍历行，y=row count
   {
