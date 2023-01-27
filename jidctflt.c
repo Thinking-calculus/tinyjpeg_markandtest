@@ -119,30 +119,11 @@ void set_chroma_v()
   chroma_v = 1;
 }
 
-
-// CGX log
-static int printf_list_count = 200;
-static int define_count = 0, count_now;
-static void printf_list(unsigned char *list, int count) // if want show diff type ,change the type of list
-{
-  int list_len = 64;
-  printf("====CGX[%d]====\n", count);
-  for (; list_len > 0; list_len--)
-  {
-    printf("   %d   ", *list++);
-    if ((list_len - 1) % 8 == 0)
-      printf("\n");
-  }
-  printf("\n====CGX====\n");
-}
-
 /*
  * Perform dequantization and inverse DCT on one block of coefficients.
  */
 void tinyjpeg_idct_float(struct component *compptr, uint8_t *output_buf, int stride)
 {
-  // CGX990
-  //  CGX4
   FAST_FLOAT tmp0, tmp1, tmp2, tmp3, tmp4, tmp5, tmp6, tmp7;
   FAST_FLOAT tmp10, tmp11, tmp12, tmp13;
   FAST_FLOAT z5, z10, z11, z12, z13;
@@ -259,12 +240,6 @@ void tinyjpeg_idct_float(struct component *compptr, uint8_t *output_buf, int str
     wsptr++;
   }
 
-  // if (printf_list_count > 0)
-  // {
-  //   printf_list_count--;
-  //   printf("CGX[%0x]\n", output_buf);
-  // }
-
   /* Pass 2: process rows from work array, store into output array. */
   /* Note that we must descale the results by a factor of 8 == 2**3. */
 
@@ -322,11 +297,5 @@ void tinyjpeg_idct_float(struct component *compptr, uint8_t *output_buf, int str
 
     wsptr += DCTSIZE; /* advance pointer to next row */
     outptr += stride;
-    // if (printf_list_count > 0&&ctr==7)
-    // {
-    //   printf("===[CGX1]outptr(%0x)\n",outptr);
-    // }
   }
-
-
 }

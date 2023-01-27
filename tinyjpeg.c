@@ -301,7 +301,7 @@ static int get_next_huffman_code(struct jdec_private *priv, struct huffman_table
   uint16_t *slowtable;
   // priv->stream 在header sos 解析后，其指向开始decode的位置。priv->reservoir,nbits_in_reservoir 在开始decode前(resync)被初始化0
   look_nbits(priv->reservoir, priv->nbits_in_reservoir, priv->stream, HUFFMAN_HASH_NBITS, hcode); // 取前9位，用于快速检索
-  value = huffman_table->lookup[hcode];                                                           // CGX 快速检索
+  value = huffman_table->lookup[hcode];                                                           //  快速检索
   if (__likely(value >= 0))
   {
     unsigned int code_size = huffman_table->code_size[value];
@@ -350,7 +350,7 @@ static void process_Huffman_data_unit(struct jdec_private *priv, int component)
   memset(DCT, 0, sizeof(DCT));
 
   /* DC coefficient decoding */                         // 8*8的方格，左上角第一位是DC量
-  huff_code = get_next_huffman_code(priv, c->DC_table); // CGX 将霍夫曼code 转回 symbol
+  huff_code = get_next_huffman_code(priv, c->DC_table); //  将霍夫曼code 转回 symbol
   // trace("+ %x\n", huff_code);
   if (huff_code)
   {
@@ -426,8 +426,8 @@ static void build_huffman_table(const unsigned char *bits, const unsigned char *
   *hz = 0; // 避免空指针
 
   // 初始化索引缓冲
-  memset(table->lookup, 0xff, sizeof(table->lookup)); // CGX 构建快速索引缓冲,在得到霍夫曼编码树后，可以用于快速解码，short int 每个位置刚好够放一个hex
-  for (i = 0; i < (16 - HUFFMAN_HASH_NBITS); i++)     // CGX 对于一些比较长的编码，会存在队列中，用循环比较的方式识别
+  memset(table->lookup, 0xff, sizeof(table->lookup)); //  构建快速索引缓冲,在得到霍夫曼编码树后，可以用于快速解码，short int 每个位置刚好够放一个hex
+  for (i = 0; i < (16 - HUFFMAN_HASH_NBITS); i++)     //  对于一些比较长的编码，会存在队列中，用循环比较的方式识别
     table->slowtable[i][0] = 0;
 
   /* Build a temp array
@@ -441,7 +441,7 @@ static void build_huffman_table(const unsigned char *bits, const unsigned char *
   {
     while (*hz == nbits) // 解析出来的前16位hex是代表对应行数据量的大小，在前面构建hz时，就会把同一行，多个数据都赋值位对应行的行数，所以这里需要一次全部拿到对应到行的数据空间
     {
-      *hc++ = code++; // CGX :对同样bit 长度的赋予长度相同的2进制值，这些值即树结构上对应索引值
+      *hc++ = code++; //  :对同样bit 长度的赋予长度相同的2进制值，这些值即树结构上对应索引值
       hz++;
     }
     code <<= 1; // code切换到下一个码长的范围 |(00),(01)2|(100),(101),(111)3|(1000)(1001)....4|...  赋值遵循C_j=(C_{j-k}+1)<<K
@@ -672,7 +672,7 @@ int chroma_ount = 0;
  */
 int test = 2;
 static void YCrCB_to_YUV420P_2x2(struct jdec_private *priv)
-{ // CGX996
+{
   unsigned char *p;
   const unsigned char *s, *y1;
   unsigned int i;
@@ -680,7 +680,7 @@ static void YCrCB_to_YUV420P_2x2(struct jdec_private *priv)
   int diff_w_16x = priv->width % 16, diff_h_16x = priv->height % 16;
   int height_min16x = (priv->height - diff_h_16x);
   int width_min16x = (priv->width - diff_w_16x); // for yuv 420 (4mcu)
-  int delete_count = 16 - (priv->width % 16);    // CGX 为了完成16block 而多出来的部分，可以直接丢弃
+  int delete_count = 16 - (priv->width % 16);    //  为了完成16block 而多出来的部分，可以直接丢弃
   int gaped = 0, index = 0, gaped_h = 0;
   unsigned char *y_p = priv->components[0]; // luma 分量所分配的空间地址
 
@@ -689,27 +689,21 @@ static void YCrCB_to_YUV420P_2x2(struct jdec_private *priv)
 
   if ((index - width_min16x) % priv->width == 0 && index != 0 && diff_w_16x != 0)
   {
-    // printf("CGX now chang gaped(%d) ===================================\n", diff_w_16x);
     gaped = 1; // 当前的p栈顶指向即将为多余数据分配多余16block的地方，即从这里开始，要丢弃掉部分没有用的数据。这是行数据补16block的适配
-    if (test)
-    {
-      test--;
-      // printf("[CGX]index(%d),width_min16x(%d),y_p(%x),p(%x)\n", index, width_min16x, y_p, p);
-    }
   }
   if (index >= (height_min16x * priv->width) && priv->height_resized) // 判断当前指针是否位于即将为高度不足16block而补的位置
   {
     // now is the extend row
     gaped_h = diff_h_16x; // 保存多出来的行数
-    // printf("[CGX]====index(%d),height_min16x(%d),gaped_h(%d)\n", index, height_min16x,gaped_h);
   }
-  // printf("[CGX]index(%d),gaped_h(%d),height_min16x(%d)\n", index, gaped_h, priv->height * priv->width);
+  // printf(" index(%d),gaped_h(%d),height_min16x(%d)\n", index, gaped_h, priv->height * priv->width);
   y1 = priv->Y;
   for (i = 0; i < 16; i++)
   {
-    if (0)
+
+    if (gaped_h == 0 || (gaped_h != 0 && i < gaped_h)) // 只保留非补充行的数据
     {
-      if (!gaped) // CGX 当没有位于需要补16block的地方时，默认保留所有数据
+      if (!gaped) //  当没有位于需要补16block的地方时，默认保留所有数据
         memcpy(p, y1, 16);
       else
         memcpy(p, y1, 16 - delete_count);
@@ -717,64 +711,35 @@ static void YCrCB_to_YUV420P_2x2(struct jdec_private *priv)
       p += priv->width; // plane指向最终储存解码数据的component,存完MUC的一行后需要跳到下一行继续存,即+width
       y1 += 16;         // yuv420为了照顾chroma 分量，luma 分量扩展到16*16的大小，跳转下一行即＋16
     }
-
-    if (1)
+    else
     {
-      if (gaped_h == 0 || (gaped_h != 0 && i < gaped_h)) // 只保留非补充行的数据
-      {
-        if (!gaped) // CGX 当没有位于需要补16block的地方时，默认保留所有数据
-          memcpy(p, y1, 16);
-        else
-          memcpy(p, y1, 16 - delete_count);
-
-        p += priv->width; // plane指向最终储存解码数据的component,存完MUC的一行后需要跳到下一行继续存,即+width
-        y1 += 16;         // yuv420为了照顾chroma 分量，luma 分量扩展到16*16的大小，跳转下一行即＋16
-      }
-      else
-      {
-        // printf("[CGX]>>>>>>>now break\n");
-        break; // 当遇到第一个为了凑够16block的补充行时，后面的行也都是补充的，可以直接跳过这些行
-      }
+      // printf(" >>>>>>>now break\n");
+      break; // 当遇到第一个为了凑够16block的补充行时，后面的行也都是补充的，可以直接跳过这些行
     }
   }
-
-  // printf("[CGX] chroma deocde (%d) ==============================\n",chroma_ount++);
-  int examing = 1;
 
   p = priv->plane[1]; // chroma u
   s = priv->Cb;
   for (i = 0; i < 8; i++)
   {
 
-    if (!examing)
+    if (gaped_h == 0 || (gaped_h != 0 && i < (gaped_h / 2)))
     {
-      memcpy(p, s, 8);
-      s += 8;
-      p += priv->width / 2;
-    }
-
-    if (examing)
-    {
-      if (gaped_h == 0 || (gaped_h != 0 && i < (gaped_h / 2)))
+      if (!gaped)
       {
-        if (!gaped)
-        {
-          memcpy(p, s, 8);
-          // printf("[CGX] normal store u chroma data=====\n");
-        }
-        else
-        {
-          // printf("[CGX][%s][%d],diff=%d\n", __func__, __LINE__, diff_w_16x / 2);
-          memcpy(p, s, diff_w_16x / 2);
-        }
-        s += 8;
-        p += priv->width / 2;
+        memcpy(p, s, 8);
       }
       else
       {
-        // printf("CGX now is u break===================\n");
-        break;
+        // printf(" [%s][%d],diff=%d\n", __func__, __LINE__, diff_w_16x / 2);
+        memcpy(p, s, diff_w_16x / 2);
       }
+      s += 8;
+      p += priv->width / 2;
+    }
+    else
+    {
+      break;
     }
   }
 
@@ -782,37 +747,24 @@ static void YCrCB_to_YUV420P_2x2(struct jdec_private *priv)
   s = priv->Cr;
   for (i = 0; i < 8; i++)
   {
-
-    if (!examing)
+    if (gaped_h == 0 || (gaped_h != 0 && i < (gaped_h / 2)))
     {
-      memcpy(p, s, 8);
-      s += 8;
-      p += priv->width / 2;
-    }
-
-    if (examing)
-    {
-      if (gaped_h == 0 || (gaped_h != 0 && i < (gaped_h / 2)))
+      if (!gaped)
       {
-        if (!gaped)
-        {
-          memcpy(p, s, 8);
-          // printf("[CGX] normal store v chroma data=====\n");
-        }
-        else
-        {
-          // printf("[CGX][%s][%d],diff=%d\n", __func__, __LINE__, diff_w_16x / 2);
-          memcpy(p, s, diff_w_16x / 2);
-        }
-
-        s += 8;
-        p += priv->width / 2;
+        memcpy(p, s, 8);
       }
       else
       {
-        // printf("CGX now is v break===================\n");
-        break;
+        // printf(" [%s][%d],diff=%d\n", __func__, __LINE__, diff_w_16x / 2);
+        memcpy(p, s, diff_w_16x / 2);
       }
+
+      s += 8;
+      p += priv->width / 2;
+    }
+    else
+    {
+      break;
     }
   }
 }
@@ -1531,25 +1483,6 @@ static void decode_MCU_2x1_1plane(struct jdec_private *priv)
   process_Huffman_data_unit(priv, cCr);
 }
 
-static int chroma_v_count = 0;
-
-// CGX log
-static int printf_list_count = 200;
-static int define_count = 0, count_now;
-static void printf_list(unsigned char *list, int count) // if want show diff type ,change the type of list
-{
-  return;
-  int list_len = 64;
-  printf("====CGX[%d]====\n", count);
-  for (; list_len > 0; list_len--)
-  {
-    printf("   %d   ", *list--);
-    if ((list_len - 1) % 8 == 0)
-      printf("\n");
-  }
-  printf("\n====CGX====\n");
-}
-
 // tinyjpeg 这份代码暂时只支持以16为倍数的解码，后续将加上逻辑
 /*
   1.420的图片,意味着4y1u1v,为了让所有通道的数据量都为64的整数倍,需要有4*64 y 1*64u 1*64v ,
@@ -1579,8 +1512,7 @@ static void printf_list(unsigned char *list, int count) // if want show diff typ
  */
 static void decode_MCU_2x2_3planes(struct jdec_private *priv)
 {
-  // trace("decode_MCU_2x2_3planes\n");//CGX3 run here
-  // CGX990
+  // trace("decode_MCU_2x2_3planes\n");//3 run here
   // Y
   process_Huffman_data_unit(priv, cY);
   IDCT(&priv->component_infos[cY], priv->Y, 16); // (struct component *compptr, uint8_t *output_buf, int stride);
@@ -1592,25 +1524,8 @@ static void decode_MCU_2x2_3planes(struct jdec_private *priv)
   IDCT(&priv->component_infos[cY], priv->Y + 64 * 2 + 8, 16);
 
   // Cb
-  process_Huffman_data_unit(priv, cCb); // chroma
+  process_Huffman_data_unit(priv, cCb);
   IDCT(&priv->component_infos[cCb], priv->Cb, 8);
-
-  // CGX log
-  if (printf_list_count)
-  {
-    // printf("[CGX]================ now u count is %d \n",chroma_v_count++);
-    count_now++;
-    if (define_count == count_now)
-    {
-      printf_list(priv->Cb, count_now);
-      printf_list_count = 0;
-    }
-    else if (define_count == 0)
-    {
-      printf_list(priv->Cb, printf_list_count);
-    }
-    printf_list_count--;
-  }
 
   // Cr
   process_Huffman_data_unit(priv, cCr);
@@ -1742,16 +1657,16 @@ static void build_quantization_table(float *qtable, const unsigned char *ref_tab
   int i, j;
   static const double aanscalefactor[8] = {
       1.0, 1.387039845, 1.306562965, 1.175875602, 1.0, 0.785694958, 0.541196100, 0.275899379};
-  // CGX 量化矩阵 https://programs.wiki/wiki/jpeg-coding-principle-file-format-and-code-analysis.html
+  //  量化矩阵 https://programs.wiki/wiki/jpeg-coding-principle-file-format-and-code-analysis.html
   // https://www.orgleaf.com/4018.html JPEG规定的量化表考虑了人眼视觉特性对不同频率分量的敏感特性：对低频敏感，对高频不敏感，因此对低频数据采用了细量化，对高频数据采用了粗量化。
-  const unsigned char *zz = zigzag; // CGX 曲折扫描法
+  const unsigned char *zz = zigzag; //  曲折扫描法
 
-  // CGX:两个for循环做一个8*8=64的量化表
+  // :两个for循环做一个8*8=64的量化表
   for (i = 0; i < 8; i++)
   {
     for (j = 0; j < 8; j++)
     {
-      *qtable++ = ref_table[*zz++] * aanscalefactor[i] * aanscalefactor[j]; // CGX 使用量化矩阵将源数据的量化表再量化一次,数据源ref_table的默认排列不是zigzag，所以这里也用了zigzag的方法去索引到对应位置的数据
+      *qtable++ = ref_table[*zz++] * aanscalefactor[i] * aanscalefactor[j]; //  使用量化矩阵将源数据的量化表再量化一次,数据源ref_table的默认排列不是zigzag，所以这里也用了zigzag的方法去索引到对应位置的数据
     }
   }
 }
@@ -1776,13 +1691,13 @@ static int parse_DQT(struct jdec_private *priv, const unsigned char *stream)
   while (stream < dqt_block_end)
   {
     qi = *stream++;
-#if SANITY_CHECK // CGX 完整性检查
+#if SANITY_CHECK //  完整性检查
     if (qi >> 4)
       error("16 bits quantization table is not supported\n");
-    if (qi > 4) // CGX 当前最多支持3个量化表
+    if (qi > 4) //  当前最多支持3个量化表
       error("No more 4 quantization table is supported (got %d)\n", qi);
 #endif
-    table = priv->Q_tables[qi]; // CGX:一个三行64列的结构，用于存放量化信息
+    table = priv->Q_tables[qi]; // :一个三行64列的结构，用于存放量化信息
     build_quantization_table(table, stream);
     stream += 64;
   }
@@ -1838,7 +1753,7 @@ static int parse_SOF(struct jdec_private *priv, const unsigned char *stream)
     cid = *stream++; // component id号
     sampling_factor = *stream++;
     Q_table = *stream++;
-    c = &priv->component_infos[i]; // CGX 遍历可以设置的组件，设置组件id(cid), 采样方式，使用的量化表编号，在sos段中将用于索引(组件id(色彩通道))
+    c = &priv->component_infos[i]; //  遍历可以设置的组件，设置组件id(cid), 采样方式，使用的量化表编号，在sos段中将用于索引(组件id(色彩通道))
 #if SANITY_CHECK
     c->cid = cid;
     if (Q_table >= COMPONENTS) // 量化表和组件号是对应的,允许多个factor使用同一个量化表?
@@ -1881,7 +1796,7 @@ static int parse_SOS(struct jdec_private *priv, const unsigned char *stream)
       error("We do not support more than 2 AC Huffman table\n");
     if ((table >> 4) >= 4)
       error("We do not support more than 2 DC Huffman table\n");
-    if (cid != priv->component_infos[i].cid) // CGX 在SOF中获取到图片通道id(component id),会需要在这里矫正一次
+    if (cid != priv->component_infos[i].cid) //  在SOF中获取到图片通道id(component id),会需要在这里矫正一次
       error("SOS cid order (%d:%d) isn't compatible with the SOF marker (%d:%d)\n",
             i, cid, i, priv->component_infos[i].cid);
     trace("ComponentId:%d  tableAC:%d tableDC:%d,table:%d\n", cid, table & 0xf, table >> 4, table);
@@ -1908,7 +1823,7 @@ static int parse_DHT(struct jdec_private *priv, const unsigned char *stream)
   unsigned char huff_bits[17];
   int length, index;
 
-  length = be16_to_cpu(stream) - 2; // CGX 长度包含两个hex 值，eg:00 A3 = 163
+  length = be16_to_cpu(stream) - 2; //  长度包含两个hex 值，eg:00 A3 = 163
   stream += 2;                      /* Skip length */
 
   trace("> DHT marker (length=%d)\n", length);
@@ -1920,10 +1835,10 @@ static int parse_DHT(struct jdec_private *priv, const unsigned char *stream)
     /* We need to calculate the number of bytes 'vals' will takes */
     huff_bits[0] = 0;
     count = 0;
-    for (i = 1; i < 17; i++) // CGX: 刚好遍历16个字节,对应 范式哈夫曼编码 的16个bits
+    for (i = 1; i < 17; i++) // : 刚好遍历16个字节,对应 范式哈夫曼编码 的16个bits
     {
       huff_bits[i] = *stream++; // 按顺序，将最前面的16个hex放到16个bits中，这16个hex数字描述 Code Length 的个数(Number)
-      count += huff_bits[i];    // CGX: 总计所有code的数量
+      count += huff_bits[i];    // : 总计所有code的数量
     }
 #if SANITY_CHECK
     if (count >= HUFFMAN_BITS_SIZE)
@@ -1934,7 +1849,7 @@ static int parse_DHT(struct jdec_private *priv, const unsigned char *stream)
 #endif
 
     if (index & 0xf0)                                                   // 高四位判断是DC还是AC，  DC(0)直流分量,AC(1)交流分量
-      build_huffman_table(huff_bits, stream, &priv->HTAC[index & 0xf]); // CGX:构建霍夫曼编码表，AC
+      build_huffman_table(huff_bits, stream, &priv->HTAC[index & 0xf]); // :构建霍夫曼编码表，AC
     else
       build_huffman_table(huff_bits, stream, &priv->HTDC[index & 0xf]); // DC，这里再&上是为了获取到霍夫曼编码树id
 
@@ -2040,18 +1955,18 @@ static int parse_JFIF(struct jdec_private *priv, const unsigned char *stream)
   /* Parse marker */
   while (!sos_marker_found)
   {
-    if (*stream++ != 0xff) // CGX 所有块以FF开头
+    if (*stream++ != 0xff) //  所有块以FF开头
       goto bogus_jpeg_format;
     /* Skip any padding ff byte (this is normal) */
     while (*stream == 0xff) // 当匹配到第一个FF后，忽略后面遇到的其他FF(jpg允许FF后跟无限个FF)
       stream++;
 
-    marker = *stream++; // CGX 无符号字符范围(0-255)刚好用于解析hex
-    //  printf(">>>CGX(%d)(%d)(%d)\n",stream[0]<<8,stream[0],stream[1]);
-    chuck_len = be16_to_cpu(stream);  // CGX 起始字节FF和maker字节后的两个字节为chunk的长度信息，需要将高8为和低8位数据结合到一起计算。这里用到了be16函数，本质是将前一个字节的数据放在高8位(左移)，后一个字节放在低8位最终得到int32数据即为chunk 长度
-    next_chunck = stream + chuck_len; // CGX 通过chuck len和当前chunk头的指针地址，获取到下一个chuck的位置
+    marker = *stream++; //  无符号字符范围(0-255)刚好用于解析hex
+    //  printf(">>>TC(%d)(%d)(%d)\n",stream[0]<<8,stream[0],stream[1]);
+    chuck_len = be16_to_cpu(stream);  //  起始字节FF和maker字节后的两个字节为chunk的长度信息，需要将高8为和低8位数据结合到一起计算。这里用到了be16函数，本质是将前一个字节的数据放在高8位(左移)，后一个字节放在低8位最终得到int32数据即为chunk 长度
+    next_chunck = stream + chuck_len; //  通过chuck len和当前chunk头的指针地址，获取到下一个chuck的位置
 
-    switch (marker) // CGX maker 字节区分不同chunk 的作用，jpeg解码chunk顺序(SOI(图片起点),APP0(文件信息),DQT(量化表),SOF0(帧头?),DHT(霍夫曼编码表),SOS(Start of scan,实际的文件信息),EOI(文件末尾))
+    switch (marker) //  maker 字节区分不同chunk 的作用，jpeg解码chunk顺序(SOI(图片起点),APP0(文件信息),DQT(量化表),SOF0(帧头?),DHT(霍夫曼编码表),SOS(Start of scan,实际的文件信息),EOI(文件末尾))
     {
     case APP0:
       // printf("Now is Application 0\n");          //SOI后的chunk
@@ -2060,7 +1975,7 @@ static int parse_JFIF(struct jdec_private *priv, const unsigned char *stream)
       if (parse_SOF(priv, stream) < 0)
         return -1;
       break;
-    case DQT: // CGX 0xDB   Define Quantization Table 定义图片的使用的量化表，APP0后的chunk
+    case DQT: //  0xDB   Define Quantization Table 定义图片的使用的量化表，APP0后的chunk
       if (parse_DQT(priv, stream) < 0)
         return -1;
       break;
@@ -2069,7 +1984,7 @@ static int parse_JFIF(struct jdec_private *priv, const unsigned char *stream)
         return -1;
       sos_marker_found = 1; // 当发现sos标签时，代表可以开始解码，会跳出chunk的识别循环
       break;
-    case DHT: // CGX 0xC4 霍夫曼编码表,一些图片的DHT会在SOF之后，
+    case DHT: //  0xC4 霍夫曼编码表,一些图片的DHT会在SOF之后，
       if (parse_DHT(priv, stream) < 0)
         return -1;
       dht_marker_found = 1;
@@ -2079,20 +1994,20 @@ static int parse_JFIF(struct jdec_private *priv, const unsigned char *stream)
         return -1;
       break;
     default:
-      trace("> Unknown marker %2.2x\n", marker); // CGX 这里会跳过(0xE0和0xFE)直接解析其他的chunk
+      trace("> Unknown marker %2.2x\n", marker); //  这里会跳过(0xE0和0xFE)直接解析其他的chunk
       break;
     }
 
     stream = next_chunck;
   }
 
-  if (!dht_marker_found) // CGX 如果前面解析结束了没有找到设定的huffman编码表，则使用默认的
+  if (!dht_marker_found) //  如果前面解析结束了没有找到设定的huffman编码表，则使用默认的
   {
     trace("No Huffman table loaded, using the default one\n");
-    build_default_huffman_tables(priv); // CGX check how to load default
+    build_default_huffman_tables(priv); //  check how to load default
   }
 
-#ifdef SANITY_CHECK // CGX:完整性检查
+#ifdef SANITY_CHECK // :完整性检查
   if ((priv->component_infos[cY].Hfactor < priv->component_infos[cCb].Hfactor) || (priv->component_infos[cY].Hfactor < priv->component_infos[cCr].Hfactor))
     error("Horizontal sampling factor for Y should be greater than horitontal sampling factor for Cb or Cr\n");
   if ((priv->component_infos[cY].Vfactor < priv->component_infos[cCb].Vfactor) || (priv->component_infos[cY].Vfactor < priv->component_infos[cCr].Vfactor))
@@ -2161,7 +2076,7 @@ int tinyjpeg_parse_header(struct jdec_private *priv, const unsigned char *buf, u
   int ret;
 
   /* Identify the file */
-  if ((buf[0] != 0xFF) || (buf[1] != SOI)) // CGX:JPG文件格式以0xFFD8开头
+  if ((buf[0] != 0xFF) || (buf[1] != SOI)) // :JPG文件格式以0xFFD8开头
     error("Not a JPG file ?\n");
 
   priv->stream_begin = buf + 2;
@@ -2238,22 +2153,21 @@ int tinyjpeg_decode(struct jdec_private *priv, int pixfmt)
   bytes_per_blocklines[1] = 0;
   bytes_per_blocklines[2] = 0;
 
-  decode_mcu_table = decode_mcu_3comp_table; // CGX togo ...
+  decode_mcu_table = decode_mcu_3comp_table; //  togo ...
   switch (pixfmt)
   {
   case TINYJPEG_FMT_YUV420P:
-    // CGX996
     colorspace_array_conv = convert_colorspace_yuv420p;
+    if (priv->components[0] == NULL)
+      priv->components[0] = (uint8_t *)malloc(priv->width * priv->height); // 灰度部分，按照像素大小创建一块缓冲。这里把y分量放在前面是为了避免y的内容占用uv 创建出来的空间，而没有出现溢出的情况
     if (priv->components[1] == NULL)
       priv->components[1] = (uint8_t *)malloc(priv->width * priv->height / 4); // uv 部分，在420的情况下4:2:0,即4个灰度1个色彩信息
     if (priv->components[2] == NULL)
       priv->components[2] = (uint8_t *)malloc(priv->width * priv->height / 4);
-    if (priv->components[0] == NULL)
-      priv->components[0] = (uint8_t *)malloc(priv->width * priv->height); // 灰度部分，按照像素大小创建一块缓冲。这里把y分量放在前面是为了避免y的内容占用uv 创建出来的空间，而没有出现溢出的情况
     bytes_per_blocklines[0] = priv->width;
     bytes_per_blocklines[1] = priv->width / 2; // 这种计算方式会导致出现小数而化整的情况，导致精度减低
     bytes_per_blocklines[2] = priv->width / 2;
-    bytes_per_mcu[0] = 8; // CGX why here is 8:4:4
+    bytes_per_mcu[0] = 8; //  why here is 8:4:4
     bytes_per_mcu[1] = 4;
     bytes_per_mcu[2] = 4;
     break;
@@ -2287,9 +2201,9 @@ int tinyjpeg_decode(struct jdec_private *priv, int pixfmt)
     trace("Bad pixel format\n");
     return -1;
   }
-  printf("[CGX]bytes_per_blocklines[0](%d),bytes_per_blocklines[1](%d),bytes_per_blocklines[2](%d)\n",
+  printf(" bytes_per_blocklines[0](%d),bytes_per_blocklines[1](%d),bytes_per_blocklines[2](%d)\n",
          bytes_per_blocklines[0], bytes_per_blocklines[1], bytes_per_blocklines[2]);
-  // printf("[CGX][%s][%d],Hfactor(%d),Vfactor(%d)\n",__FUNCTION__,__LINE__,priv->component_infos[cY].Hfactor,priv->component_infos[cY].Vfactor);
+  // printf(" [%s][%d],Hfactor(%d),Vfactor(%d)\n",__FUNCTION__,__LINE__,priv->component_infos[cY].Hfactor,priv->component_infos[cY].Vfactor);
   xstride_by_mcu = ystride_by_mcu = 8;
   if ((priv->component_infos[cY].Hfactor | priv->component_infos[cY].Vfactor) == 1) // 判断luma 采样方式,yuv420因为极限压缩chrmoa 分量，实际上可以认为其luma是2*2采样
   {
@@ -2327,7 +2241,7 @@ int tinyjpeg_decode(struct jdec_private *priv, int pixfmt)
   if (TINYJPEG_FMT_YUV420P == pixfmt)
   {
     bytes_per_blocklines[1] *= ystride_by_mcu / 2;
-    bytes_per_blocklines[2] *= ystride_by_mcu / 2;// this fix func is ugly ,need improve it
+    bytes_per_blocklines[2] *= ystride_by_mcu / 2; // this fix func is ugly ,need improve it
   }
   else
   {
@@ -2338,30 +2252,25 @@ int tinyjpeg_decode(struct jdec_private *priv, int pixfmt)
   bytes_per_mcu[0] *= xstride_by_mcu / 8;
   bytes_per_mcu[1] *= xstride_by_mcu / 8;
   bytes_per_mcu[2] *= xstride_by_mcu / 8;
-  printf("[CGX]priv->width*priv->height(%d),ystride_by_mcu(%d)\n", priv->width * priv->height, ystride_by_mcu);
-  printf("[CGX][%s][%d],bytes_per_mcu[0](%d),bytes_per_mcu[1](%d),bytes_per_mcu[2](%d),priv->restarts_to_go(%d),bytes_per_blocklines[0](%d),bytes_per_blocklines[1](%d)\n",
-         __FUNCTION__, __LINE__,
-         bytes_per_mcu[0],
-         bytes_per_mcu[1],
-         bytes_per_mcu[2],
-         priv->restarts_to_go,
-         bytes_per_blocklines[0], bytes_per_blocklines[1]);
+
+  // printf(" priv->width*priv->height(%d),ystride_by_mcu(%d)\n", priv->width * priv->height, ystride_by_mcu);
+  // printf(" [%s][%d],bytes_per_mcu[0](%d),bytes_per_mcu[1](%d),bytes_per_mcu[2](%d),priv->restarts_to_go(%d),bytes_per_blocklines[0](%d),bytes_per_blocklines[1](%d)\n",
+  //        __FUNCTION__, __LINE__,
+  //        bytes_per_mcu[0],
+  //        bytes_per_mcu[1],
+  //        bytes_per_mcu[2],
+  //        priv->restarts_to_go,
+  //        bytes_per_blocklines[0], bytes_per_blocklines[1]);
+
   /* Just the decode the image by macroblock (size is 8x8, 8x16, or 16x16) */
   for (y = 0; y < (priv->height / ystride_by_mcu) + priv->height_resized; y++) // 按照MCU的宽度遍历行，y=row count
   {
     // trace("Decoding row %d\n", y);
-
     priv->plane[0] = priv->components[0] + (y * bytes_per_blocklines[0]); // components 为最终导出格式的空间
     priv->plane[1] = priv->components[1] + (y * bytes_per_blocklines[1]);
     priv->plane[2] = priv->components[2] + (y * bytes_per_blocklines[2]);
     for (x = 0; x < (priv->width); x += xstride_by_mcu) // 按MCU长度遍历列
     {
-      // CGX995
-      //  if (y >= priv->height / ystride_by_mcu)
-      //  {
-      //    //位于扩展行时的打印
-      //    printf("[CGX][%s][%d]y(%d)x(%d)<<<<<<<\n", __FUNCTION__, __LINE__, y,x);
-      //  }
       decode_MCU(priv);                   // 实际解码函数和idtc实作
       convert_to_pixfmt(priv);            // 导出为指定格式
       priv->plane[0] += bytes_per_mcu[0]; // 因为是MCU为计算单元大小，但components储存空间是线性且按照图片大小(左上到右下按像素单元)储存，所以这里依旧是以一个MCU为步长做跳转,然后在convert_to_pixfmt()里做换行逻辑
@@ -2403,7 +2312,7 @@ void tinyjpeg_get_size(struct jdec_private *priv, unsigned int *width, unsigned 
 int tinyjpeg_get_components(struct jdec_private *priv, unsigned char **components)
 {
   int i;
-  for (i = 0; i < COMPONENTS; i++) // CGX 这里的判断会有问题，暂时摘掉会好
+  for (i = 0; i < COMPONENTS; i++) //  这里的判断会有问题，暂时摘掉会好
   {
     if (priv->components[i] != NULL)
     {
