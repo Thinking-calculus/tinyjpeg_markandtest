@@ -486,7 +486,7 @@ static void build_huffman_table(const unsigned char *bits, const unsigned char *
     else
     {
       /* Perhaps sorting the array will be an optimization */
-      uint16_t *slowtable = table->slowtable[code_size - HUFFMAN_HASH_NBITS - 1]; // 是一个7个长度为
+      uint16_t *slowtable = table->slowtable[code_size - HUFFMAN_HASH_NBITS - 1]; // HUFFMAN_HASH_NBITS=9
       while (slowtable[0])                                                        // 只能遍历7次，大于9的只有剩下的7个长度的数据
         slowtable += 2;                                                           // 当前的索引已经被占用，遍历到最后一个没有占用的为止
       slowtable[0] = code;                                                        // CG:有必要为3个值设置如此大的空间吗(256)意义是什么？是不是可以优化掉？
